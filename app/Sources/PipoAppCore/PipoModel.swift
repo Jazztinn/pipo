@@ -221,7 +221,8 @@ public final class PipoModel {
     }
 
     public func diagnostics() -> PipoDiagnostics? {
-        snapshot.map(PipoDiagnostics.init)
+        guard let snapshot else { return nil }
+        return PipoDiagnostics(snapshot: snapshot)
     }
 
     public func clearCache() async {
