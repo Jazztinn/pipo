@@ -102,33 +102,33 @@ struct PipoV03TodayView: View {
 
     @ViewBuilder
     private func content(_ snapshot: PipoDashboardSnapshot) -> some View {
-        let next = filteredTasks(snapshot.nextUp.isEmpty ? Array(snapshot.dueSoon.prefix(1)) : snapshot.nextUp)
-        if !next.isEmpty && itemFilter == .all {
-            PipoV03Section(title: "Next up", systemImage: "sparkles", retry: retryAction(for: "assignments")) {
-                PipoV03ItemList(items: next.map(taskDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze)
+        let next = Array(filteredTasks(snapshot.nextUp.isEmpty ? snapshot.dueSoon : snapshot.nextUp).prefix(3))
+        if itemFilter == .all {
+            PipoV03Section(title: "Up next", systemImage: "sparkles", retry: retryAction(for: "assignments")) {
+                if next.isEmpty { PipoV03SectionEmpty(text: "Nothing urgent") }
+                else { PipoV03ItemList(items: next.map(taskDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze) }
             }
         }
 
-        let schedule = snapshot.schedule.filter { matches($0.title, $0.courseName) }
-        if snapshot.featureSupport.schedule && !schedule.isEmpty && (itemFilter == .all) {
-            PipoV03Section(title: "Schedule", systemImage: "calendar", retry: retryAction(for: "schedule")) {
-                PipoV03ItemList(items: schedule.map(scheduleDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze)
+        let schedule = snapshot.schedule.filter { Calendar.current.isDateInToday($0.startsAt) && matches($0.title, $0.courseName) }
+        if itemFilter == .all {
+            PipoV03Section(title: "Today's schedule", systemImage: "calendar", retry: retryAction(for: "schedule")) {
+                if !snapshot.featureSupport.schedule { PipoV03SectionEmpty(text: "Calendar unavailable from LMS") }
+                else if schedule.isEmpty { PipoV03SectionEmpty(text: "No events today") }
+                else { PipoV03ItemList(items: schedule.map(scheduleDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze) }
             }
         }
 
-        if snapshot.supported.dueSoon && itemFilter == .all || itemFilter == .assignments {
-            ForEach(snapshot.deadlineGroups().filter { !$0.1.filter { matches($0.title, $0.courseName) && !snoozedIDs.contains($0.id) }.isEmpty }, id: \.0) { group in
-                let items = group.1.filter { matches($0.title, $0.courseName) && !snoozedIDs.contains($0.id) }
-                if !items.isEmpty {
-                    PipoV03Section(title: group.0, systemImage: "calendar.badge.clock", retry: retryAction(for: "due_soon")) {
-                        PipoV03ItemList(items: items.map(taskDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze)
-                    }
-                }
+        if snapshot.supported.dueSoon && (itemFilter == .all || itemFilter == .assignments) {
+            let items = thisWeekTasks(snapshot.dueSoon)
+            PipoV03Section(title: "This week", systemImage: "calendar.badge.clock", retry: retryAction(for: "due_soon")) {
+                if items.isEmpty { PipoV03SectionEmpty(text: "No deadlines this week") }
+                else { PipoV03ItemList(items: items.map(taskDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze) }
             }
         }
 
         if snapshot.featureSupport.announcements && (itemFilter == .all || itemFilter == .announcements) {
-            let announcements = snapshot.announcements.filter { matches($0.title, $0.courseName) }
+            let announcements = recent(snapshot.announcements.filter { matches($0.title, $0.courseName) }, date: \.date)
             if !announcements.isEmpty {
                 PipoV03Section(title: "Announcements", systemImage: "megaphone", retry: retryAction(for: "announcements")) {
                     PipoV03ItemList(items: announcements.map(announcementDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze)
@@ -137,7 +137,7 @@ struct PipoV03TodayView: View {
         }
 
         if itemFilter == .all || itemFilter == .messages {
-            let messages = snapshot.messages.filter { matches($0.title, $0.courseName) }
+            let messages = recent(snapshot.messages.filter { matches($0.title, $0.courseName) }, date: \.date)
             if snapshot.supported.messages && !messages.isEmpty {
                     PipoV03Section(title: "Recent messages", systemImage: "bubble.left.and.bubble.right", retry: retryAction(for: "messages")) {
                     PipoV03ItemList(items: messages.map(messageDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze)
@@ -146,7 +146,7 @@ struct PipoV03TodayView: View {
         }
 
         if snapshot.supported.grades && itemFilter == .all {
-            let grades = snapshot.gradeFeedback.filter { matches($0.title, $0.courseName) }
+            let grades = recent(snapshot.gradeFeedback.filter { matches($0.title, $0.courseName) }, date: \.date)
             if !grades.isEmpty {
                 PipoV03Section(title: "Grade feedback", systemImage: "checkmark.seal", retry: retryAction(for: "grades")) {
                     PipoV03ItemList(items: grades.map(gradeDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze)
@@ -155,7 +155,7 @@ struct PipoV03TodayView: View {
         }
 
         if snapshot.featureSupport.resources && (itemFilter == .all || itemFilter == .resources) {
-            let resources = snapshot.resources.filter { matches($0.title, $0.courseName) }
+            let resources = recent(snapshot.resources.filter { matches($0.title, $0.courseName) }, date: \.date)
             if !resources.isEmpty {
                 PipoV03Section(title: "Recent resources", systemImage: "folder", retry: retryAction(for: "resources")) {
                     PipoV03ItemList(items: resources.map(resourceDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze)
@@ -173,6 +173,25 @@ struct PipoV03TodayView: View {
 
     private func filteredTasks(_ tasks: [PipoTaskItem]) -> [PipoTaskItem] {
         tasks.filter { matches($0.title, $0.courseName) && !snoozedIDs.contains($0.id) }
+    }
+
+    private func thisWeekTasks(_ tasks: [PipoTaskItem], now: Date = .now) -> [PipoTaskItem] {
+        let start = Calendar.current.startOfDay(for: now)
+        let end = Calendar.current.date(byAdding: .day, value: 7, to: start) ?? now.addingTimeInterval(604_800)
+        return filteredTasks(tasks)
+            .filter { item in
+                guard let dueDate = item.dueDate else { return false }
+                return dueDate >= start && dueDate < end
+            }
+            .sorted { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) }
+    }
+
+    private func recent<Item>(_ items: [Item], date: KeyPath<Item, Date?>, now: Date = .now) -> [Item] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: now) ?? now.addingTimeInterval(-2_592_000)
+        return Array(items
+            .filter { item in item[keyPath: date].map { $0 >= cutoff } ?? true }
+            .sorted { ($0[keyPath: date] ?? .distantPast) > ($1[keyPath: date] ?? .distantPast) }
+            .prefix(5))
     }
 
     private func retryAction(for section: String) -> (() -> Void)? {
@@ -689,6 +708,7 @@ private struct PipoV03Section<Content: View>: View {
     let systemImage: String
     let retry: (() -> Void)?
     @ViewBuilder let content: Content
+    @State private var isExpanded = true
 
     init(title: String, systemImage: String, retry: (() -> Void)? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
@@ -700,9 +720,14 @@ private struct PipoV03Section<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label(title, systemImage: systemImage)
-                    .font(.headline)
-                    .foregroundStyle(PipoV03Palette.maroon)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) { isExpanded.toggle() }
+                } label: {
+                    Label(title, systemImage: systemImage)
+                        .font(.headline)
+                        .foregroundStyle(PipoV03Palette.maroon)
+                }
+                .buttonStyle(.plain)
                 Spacer()
                 if let retry {
                     Button("Retry \(title)", systemImage: "arrow.clockwise", action: retry)
@@ -711,9 +736,27 @@ private struct PipoV03Section<Content: View>: View {
                         .foregroundStyle(.secondary)
                         .help("Retry \(title)")
                 }
+                Button(isExpanded ? "Collapse \(title)" : "Expand \(title)", systemImage: isExpanded ? "chevron.up" : "chevron.down") {
+                    withAnimation(.easeInOut(duration: 0.16)) { isExpanded.toggle() }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
-            content
+            if isExpanded { content }
         }
+    }
+}
+
+@MainActor
+private struct PipoV03SectionEmpty: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 28)
     }
 }
 
@@ -733,8 +776,9 @@ private struct PipoV03ItemList: View {
             ForEach(items) { item in
                 HStack(alignment: .top, spacing: 8) {
                     Button {
+                        guard let destination = item.destination else { return }
+                        onOpenURL(destination)
                         onSeen(item.id)
-                        if let destination = item.destination { onOpenURL(destination) }
                     } label: {
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: item.icon)
