@@ -32,12 +32,13 @@ public enum PipoJSONValue: Codable, Equatable, Sendable {
 }
 
 public struct SidecarRequest: Codable, Sendable {
-    public let version = 1
+    public let version: Int
     public let id: String
     public let method: String
     public let params: [String: PipoJSONValue]
 
-    public init(method: String, params: [String: PipoJSONValue]) {
+    public init(version: Int = 1, method: String, params: [String: PipoJSONValue]) {
+        self.version = version
         self.id = UUID().uuidString
         self.method = method
         self.params = params

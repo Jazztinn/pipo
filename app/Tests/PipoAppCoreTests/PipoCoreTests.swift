@@ -14,8 +14,9 @@ import Testing
     let cache = InMemoryDashboardCache(snapshot: cached)
     let coordinator = DashboardRefreshCoordinator(transport: FailingTransport(), cache: cache)
     let result = try await coordinator.refresh(token: "token", force: true)
+    let restored = try await cache.load()
     #expect(result == cached)
-    #expect(try await cache.load() == cached)
+    #expect(restored == cached)
     #expect(await coordinator.lastResultUsedCache())
 }
 
@@ -33,9 +34,10 @@ import Testing
     #expect(snapshot.presentingNewAssignments(since: []).sections.newAssignments == [assignment])
 }
 
-@Test func rejectsExternalDestination() {
+@Test func rejectsExternalDestination() throws {
     #expect(throws: PipoCoreError.originRejected) { try DestinationPolicy.resolve("https://example.edu/login") }
-    #expect(try DestinationPolicy.resolve("/course/view.php?id=12").host == "lms.lpucavite.edu.ph")
+    let destination = try DestinationPolicy.resolve("/course/view.php?id=12")
+    #expect(destination.host == "lms.lpucavite.edu.ph")
 }
 
 @Test func secretRedactionHidesTokenAndPassword() {
@@ -74,9 +76,10 @@ import Testing
     let cache = InMemoryDashboardCache(snapshot: sampleSnapshot())
     let model = PipoModel(transport: FailingTransport(), tokenStore: tokenStore, cacheKeyStore: cacheKeyStore, refreshCoordinator: DashboardRefreshCoordinator(transport: FailingTransport(), cache: cache), urlOpener: { _ in })
     await model.signOut()
+    let cachedAfterSignOut = try? await cache.load()
     #expect(tokenStore.value == nil)
     #expect(cacheKeyStore.value == nil)
-    #expect(try? await cache.load() == nil)
+    #expect(cachedAfterSignOut == nil)
     #expect(model.phase == .signedOut)
 }
 
