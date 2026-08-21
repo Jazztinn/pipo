@@ -10,6 +10,7 @@ VERSION=$1
 ARCHIVE=$2
 SPARKLE_BIN=$3
 CHANNEL=${4:-stable}
+SPARKLE_KEY_FILE=${SPARKLE_KEY_FILE:-}
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TAG="v$VERSION"
 APPCAST="$ROOT/appcast.xml"
@@ -39,8 +40,13 @@ ditto -x -k "$ARCHIVE" "$EXTRACTED"
 test -d "$EXTRACTED/Pipo.app"
 "$ROOT/scripts/build-dmg.sh" "$EXTRACTED/Pipo.app" "$UPDATES/Pipo-$VERSION-arm64.dmg"
 
-/usr/bin/script -q /dev/null "$SPARKLE_BIN/generate_appcast" \
-  --account com.jazztinn.pipo \
+set -- --account com.jazztinn.pipo
+if [ -n "$SPARKLE_KEY_FILE" ]; then
+  set -- --ed-key-file "$SPARKLE_KEY_FILE"
+fi
+
+"$SPARKLE_BIN/generate_appcast" \
+  "$@" \
   --download-url-prefix "https://github.com/Jazztinn/pipo/releases/download/$TAG/" \
   --link "https://github.com/Jazztinn/pipo" \
   --maximum-deltas 0 \

@@ -31,8 +31,14 @@ cp -R "$SPARKLE_FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
 # SwiftPM links Sparkle with @rpath; point that lookup at the app framework folder.
 install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS/PipoApp"
 
-# Re-seal the assembled beta bundle after copying resources and nested code.
-codesign --force --deep --sign - "$APP"
+# Re-seal the assembled bundle after copying resources and nested code. Release
+# automation supplies a Developer ID identity; local builds stay ad-hoc signed.
+CODESIGN_IDENTITY=${CODESIGN_IDENTITY:--}
+if [ "$CODESIGN_IDENTITY" = "-" ]; then
+  codesign --force --deep --sign - "$APP"
+else
+  codesign --force --deep --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$APP"
+fi
 codesign --verify --deep --strict "$APP"
 
 echo "$APP"

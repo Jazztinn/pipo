@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version from Info.plist, without v
+        required: true
+        type: string
+      channel:
+        description: Sparkle channel
+        required: true
+        default: stable
+        type: choice
+        options: [stable, beta]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pipo-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: stable
+
+      - name: Validate release metadata
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' app/Resources/Info.plist)" = "$VERSION"
+          test "$(git tag -l "v$VERSION")" = ""
+
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/pipo-signing.keychain-db"
+          printf '%s' "$CERTIFICATE_P12_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build signed app
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+        run: scripts/build-local-beta.sh
+
+      - name: Verify app signature
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/Pipo.app
+          codesign -dv --verbose=4 dist/Pipo.app
+
+      - name: Build installer
+        env:
+          VERSION: ${{ inputs.version }}
+        run: scripts/build-dmg.sh dist/Pipo.app "dist/Pipo-$VERSION-arm64.dmg"
+
+      - name: Notarize and staple
+        env:
+          VERSION: ${{ inputs.version }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool submit "dist/Pipo-$VERSION-arm64.dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "dist/Pipo-$VERSION-arm64.dmg"
+          xcrun stapler validate "dist/Pipo-$VERSION-arm64.dmg"
+
+      - name: Download Sparkle tools
+        env:
+          SPARKLE_VERSION: 2.9.2
+        run: |
+          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" -o "$RUNNER_TEMP/sparkle.tar.xz"
+          mkdir "$RUNNER_TEMP/sparkle"
+          tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+          test -x "$RUNNER_TEMP/sparkle/bin/generate_appcast"
+
+      - name: Generate signed appcast
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          UPDATES="$RUNNER_TEMP/updates"
+          FEED=appcast.xml
+          CHANNEL_ARGS=()
+          if [ "$CHANNEL" = beta ]; then
+            FEED=appcast-beta.xml
+            CHANNEL_ARGS=(--channel beta)
+          fi
+          mkdir "$UPDATES"
+          cp "dist/Pipo-$VERSION-arm64.dmg" "$UPDATES/"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$RUNNER_TEMP/sparkle/bin/generate_appcast" \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/Jazztinn/pipo/releases/download/v$VERSION/" \
+            --link "https://github.com/Jazztinn/pipo" \
+            --maximum-deltas 0 \
+            "${CHANNEL_ARGS[@]}" \
+            -o "$FEED" \
+            "$UPDATES"
+
+      - name: Publish release and update feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          RELEASE_ARGS=()
+          FEED=appcast.xml
+          if [ "$CHANNEL" = beta ]; then
+            RELEASE_ARGS=(--prerelease)
+            FEED=appcast-beta.xml
+          fi
+          gh release create "v$VERSION" "dist/Pipo-$VERSION-arm64.dmg" \
+            --title "Pipo $VERSION" \
+            --generate-notes \
+            "${RELEASE_ARGS[@]}"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$FEED"
+          git commit -m "release: publish v$VERSION update feed"
+          git push origin HEAD:main
