@@ -1,0 +1,9 @@
+{
+  "sitename": "LPU Cavite LMS",
+  "fullname": "Alex Lycean",
+  "userid": 7,
+  "functions": [
+    { "name": "core_enrol_get_users_courses" },
+    { "name": "core_calendar_get_action_events_by_timesort" }
+  ]
+}
