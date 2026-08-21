@@ -23,7 +23,7 @@ struct PipoApp: App {
         }
         .defaultSize(width: 560, height: 620)
 
-        MenuBarExtra("Pipo", systemImage: "flag.fill") {
+        MenuBarExtra {
             PipoRootView(
                 model: model,
                 configuration: PipoUIConfiguration(
@@ -32,6 +32,17 @@ struct PipoApp: App {
                 )
             )
                 .frame(width: 420, height: 620)
+        } label: {
+            let count = model.snapshot.map {
+                PipoDashboardRanking.urgentCount(snapshot: $0, state: model.localState)
+            } ?? 0
+            if count > 0 {
+                Label("\(count)", systemImage: "flag.fill")
+                    .accessibilityLabel("Pipo, \(count) urgent items")
+            } else {
+                Image(systemName: "flag.fill")
+                    .accessibilityLabel("Pipo")
+            }
         }
         .menuBarExtraStyle(.window)
     }

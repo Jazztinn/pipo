@@ -22,14 +22,22 @@ public struct PipoSettings: Equatable, Sendable {
     public var reminderHourBefore: Bool = true
     public var quietHoursStart: Int = 22
     public var quietHoursEnd: Int = 7
+    public var assignmentNotifications = true
+    public var announcementNotifications = true
+    public var messageNotifications = true
+    public var gradeNotifications = true
 
-    public init(refreshInterval: TimeInterval = 15 * 60, notificationsEnabled: Bool = true, reminderDayBefore: Bool = true, reminderHourBefore: Bool = true, quietHoursStart: Int = 22, quietHoursEnd: Int = 7) {
+    public init(refreshInterval: TimeInterval = 15 * 60, notificationsEnabled: Bool = true, reminderDayBefore: Bool = true, reminderHourBefore: Bool = true, quietHoursStart: Int = 22, quietHoursEnd: Int = 7, assignmentNotifications: Bool = true, announcementNotifications: Bool = true, messageNotifications: Bool = true, gradeNotifications: Bool = true) {
         self.refreshInterval = refreshInterval
         self.notificationsEnabled = notificationsEnabled
         self.reminderDayBefore = reminderDayBefore
         self.reminderHourBefore = reminderHourBefore
         self.quietHoursStart = quietHoursStart
         self.quietHoursEnd = quietHoursEnd
+        self.assignmentNotifications = assignmentNotifications
+        self.announcementNotifications = announcementNotifications
+        self.messageNotifications = messageNotifications
+        self.gradeNotifications = gradeNotifications
     }
 }
 

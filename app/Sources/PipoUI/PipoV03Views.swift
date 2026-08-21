@@ -12,18 +12,6 @@ private enum PipoV03Palette {
     static let row = Color(nsColor: .controlBackgroundColor)
 }
 
-private enum PipoV03Store {
-    static func ids(from raw: String) -> Set<String> {
-        guard let data = raw.data(using: .utf8), let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return Set(ids)
-    }
-
-    static func raw(ids: Set<String>) -> String {
-        guard let data = try? JSONEncoder().encode(ids.sorted()) else { return "[]" }
-        return String(decoding: data, as: UTF8.self)
-    }
-}
-
 private enum PipoV03ItemFilter: String, CaseIterable, Identifiable {
     case all
     case assignments
@@ -61,11 +49,8 @@ private struct PipoV03TodayView: View {
     @State private var query = ""
     @State private var courseFilter = "All courses"
     @State private var itemFilter: PipoV03ItemFilter = .all
-    @AppStorage("pipo.ui.seen-items") private var seenItems = "[]"
-    @AppStorage("pipo.ui.snoozed-items") private var snoozedItems = "[]"
-
-    private var seenIDs: Set<String> { PipoV03Store.ids(from: seenItems) }
-    private var snoozedIDs: Set<String> { PipoV03Store.ids(from: snoozedItems) }
+    private var seenIDs: Set<String> { configuration.seenIDs() }
+    private var snoozedIDs: Set<String> { configuration.snoozedIDs() }
     private var courseNames: [String] {
         guard let snapshot else { return [] }
         let names = snapshot.courses.map(\.name)
@@ -231,16 +216,10 @@ private struct PipoV03TodayView: View {
     }
 
     private func markSeen(_ id: String) {
-        var ids = seenIDs
-        ids.insert(id)
-        seenItems = PipoV03Store.raw(ids: ids)
         configuration.markSeen?(id)
     }
 
     private func snooze(_ id: String, date: Date?) {
-        var ids = snoozedIDs
-        ids.insert(id)
-        snoozedItems = PipoV03Store.raw(ids: ids)
         configuration.snooze?(id, date)
     }
 }
@@ -258,11 +237,8 @@ private struct PipoV03CoursesView: View {
     let onSnapshot: (PipoDashboardSnapshot) -> Void
 
     @State private var query = ""
-    @AppStorage("pipo.ui.pinned-courses") private var pinnedCourses = "[]"
-    @AppStorage("pipo.ui.hidden-courses") private var hiddenCourses = "[]"
-
-    private var pinnedIDs: Set<String> { PipoV03Store.ids(from: pinnedCourses) }
-    private var hiddenIDs: Set<String> { PipoV03Store.ids(from: hiddenCourses) }
+    private var pinnedIDs: Set<String> { configuration.pinnedCourseIDs() }
+    private var hiddenIDs: Set<String> { configuration.hiddenCourseIDs() }
     private var visibleCourses: [PipoCourseItem] {
         courses.filter { !hiddenIDs.contains($0.id) && (query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) || $0.shortName.localizedCaseInsensitiveContains(query)) }
             .sorted { left, right in
@@ -359,21 +335,15 @@ private struct PipoV03CoursesView: View {
     }
 
     private func togglePin(_ id: String) {
-        var ids = pinnedIDs
-        if ids.contains(id) { ids.remove(id) } else { ids.insert(id) }
-        pinnedCourses = PipoV03Store.raw(ids: ids)
+        configuration.setPinnedCourse?(id, !pinnedIDs.contains(id))
     }
 
     private func hide(_ id: String) {
-        var ids = hiddenIDs
-        ids.insert(id)
-        hiddenCourses = PipoV03Store.raw(ids: ids)
+        configuration.setHiddenCourse?(id, true)
     }
 
     private func unhide(_ id: String) {
-        var ids = hiddenIDs
-        ids.remove(id)
-        hiddenCourses = PipoV03Store.raw(ids: ids)
+        configuration.setHiddenCourse?(id, false)
     }
 }
 
@@ -469,11 +439,11 @@ public struct PipoV03SettingsView: View {
     private let onInstallUpdate: (@MainActor () -> Void)?
     private let configuration: PipoUIConfiguration
     @AppStorage("pipo.notifications.enabled") private var notificationsEnabled = true
-    @AppStorage("pipo.ui.reminders.24h") private var reminder24Hours = true
-    @AppStorage("pipo.ui.reminders.1h") private var reminderOneHour = true
-    @AppStorage("pipo.ui.quiet.start") private var quietStart = 22
-    @AppStorage("pipo.ui.quiet.end") private var quietEnd = 7
-    @AppStorage("pipo.ui.update-channel") private var updateChannel = "Stable"
+    @AppStorage("pipo.reminders.day-before") private var reminder24Hours = true
+    @AppStorage("pipo.reminders.hour-before") private var reminderOneHour = true
+    @AppStorage("pipo.quiet-hours.start") private var quietStart = 22
+    @AppStorage("pipo.quiet-hours.end") private var quietEnd = 7
+    @AppStorage("pipo.updates.channel") private var updateChannel = "stable"
     @State private var isSignOutConfirmationPresented = false
     @State private var storageMessage: String?
 
@@ -523,6 +493,36 @@ public struct PipoV03SettingsView: View {
                 .onChange(of: quietEnd) { _, value in model.settings.quietHoursEnd = value }
             }
 
+            Section("Notification categories") {
+                Toggle("Assignments", isOn: $model.settings.assignmentNotifications)
+                Toggle("Announcements", isOn: $model.settings.announcementNotifications)
+                Toggle("Messages", isOn: $model.settings.messageNotifications)
+                Toggle("Grade feedback", isOn: $model.settings.gradeNotifications)
+            }
+
+            Section("Courses") {
+                if model.localState.pinnedCourseIDs.isEmpty && model.localState.hiddenCourseIDs.isEmpty {
+                    Text("No pinned or hidden courses").foregroundStyle(.secondary)
+                }
+                ForEach(model.localState.pinnedCourseIDs.sorted(), id: \.self) { id in
+                    Button("Unpin course \(id)", systemImage: "pin.slash") {
+                        Task { await model.setPinnedCourse(id, pinned: false) }
+                    }
+                }
+                ForEach(model.localState.hiddenCourseIDs.sorted(), id: \.self) { id in
+                    Button("Show hidden course \(id)", systemImage: "eye") {
+                        Task { await model.setHiddenCourse(id, hidden: false) }
+                    }
+                }
+            }
+
+            Section("Calendar") {
+                LabeledContent("Authorization", value: model.calendarAuthorizationDescription)
+                Button("Allow Calendar access", systemImage: "calendar.badge.plus") {
+                    Task { _ = try? await model.requestCalendarAccess() }
+                }
+            }
+
             Section("Capabilities") {
                 PipoV03CapabilityRow(title: "Schedule", supported: model.snapshot?.supported.dueSoon == true || model.snapshot?.featureSupport.schedule == true)
                 PipoV03CapabilityRow(title: "Submission status", supported: model.snapshot?.featureSupport.submissionStatus ?? true)
@@ -537,7 +537,11 @@ public struct PipoV03SettingsView: View {
             }
 
             Section("Updates") {
-                Picker("Channel", selection: $updateChannel) { Text("Stable").tag("Stable"); Text("Beta").tag("Beta") }
+                Picker("Channel", selection: $updateChannel) { Text("Stable").tag("stable"); Text("Beta").tag("beta") }
+                    .onChange(of: updateChannel) { _, value in
+                        UserDefaults.standard.set(value, forKey: "pipo.updates.channel")
+                        NotificationCenter.default.post(name: Notification.Name("com.jazztinn.pipo.update-channel-changed"), object: nil)
+                    }
                 if let onInstallUpdate { Button(action: onInstallUpdate) { Label("Check for updates", systemImage: "arrow.down.circle") } }
                 LabeledContent("Version") { Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development").foregroundStyle(.secondary) }
             }
@@ -660,6 +664,8 @@ private struct PipoV03ItemList: View {
     let seenIDs: Set<String>
     let onSeen: (String) -> Void
     let onSnooze: (String, Date?) -> Void
+    @State private var customSnoozeItem: PipoV03DisplayItem?
+    @State private var customSnoozeDate = Date().addingTimeInterval(3_600)
 
     var body: some View {
         VStack(spacing: 6) {
@@ -698,9 +704,20 @@ private struct PipoV03ItemList: View {
                         if configuration.snooze != nil {
                             Divider()
                             Button("Snooze 1 hour", systemImage: "clock") { onSnooze(item.id, Date().addingTimeInterval(3_600)) }
-                            Button("Snooze until tomorrow", systemImage: "sunrise") { onSnooze(item.id, Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))) }
+                            Button("Snooze until tomorrow", systemImage: "sunrise") {
+                                let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) ?? .now
+                                onSnooze(item.id, Calendar.current.date(bySettingHour: 7, minute: 0, second: 0, of: tomorrow))
+                            }
+                            Button("Choose date", systemImage: "calendar") {
+                                customSnoozeDate = Date().addingTimeInterval(3_600)
+                                customSnoozeItem = item
+                            }
                         }
-                        Button("Mark as seen", systemImage: "eye") { onSeen(item.id) }
+                        if seenIDs.contains(item.id), let undoSeen = configuration.undoSeen {
+                            Button("Mark as new", systemImage: "eye.slash") { undoSeen(item.id) }
+                        } else {
+                            Button("Mark as seen", systemImage: "eye") { onSeen(item.id) }
+                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
@@ -712,6 +729,24 @@ private struct PipoV03ItemList: View {
                 .background(PipoV03Palette.row, in: RoundedRectangle(cornerRadius: 7))
                 .accessibilityElement(children: .contain)
             }
+        }
+        .sheet(item: $customSnoozeItem) { item in
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Snooze reminder").font(.headline)
+                Text(item.title).lineLimit(2).foregroundStyle(.secondary)
+                DatePicker("Remind me", selection: $customSnoozeDate, in: Date()...)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { customSnoozeItem = nil }
+                    Button("Snooze") {
+                        onSnooze(item.id, customSnoozeDate)
+                        customSnoozeItem = nil
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(20)
+            .frame(width: 340)
         }
     }
 

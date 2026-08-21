@@ -58,7 +58,11 @@ public final class PipoModel {
             reminderDayBefore: savedDayBefore,
             reminderHourBefore: savedHourBefore,
             quietHoursStart: quietStart,
-            quietHoursEnd: quietEnd
+            quietHoursEnd: quietEnd,
+            assignmentNotifications: defaults.object(forKey: "pipo.notifications.assignments") as? Bool ?? true,
+            announcementNotifications: defaults.object(forKey: "pipo.notifications.announcements") as? Bool ?? true,
+            messageNotifications: defaults.object(forKey: "pipo.notifications.messages") as? Bool ?? true,
+            gradeNotifications: defaults.object(forKey: "pipo.notifications.grades") as? Bool ?? true
         )
         let cacheURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Pipo/dashboard.sqlite", isDirectory: false)
         try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -206,6 +210,14 @@ public final class PipoModel {
         localState.snoozedUntil[itemID] = date
         await persistLocalState()
         applyLocalState()
+        if let item = allDashboardItems.first(where: { $0.id == itemID }) {
+            await notificationService.scheduleSnooze(
+                id: itemID,
+                title: "Pipo reminder",
+                body: "\(item.courseName): \(item.title)",
+                date: PipoReminderPlanner.shiftOutOfQuietHours(date, settings: settings)
+            )
+        }
     }
 
     public func diagnostics() -> PipoDiagnostics? {
@@ -243,9 +255,13 @@ public final class PipoModel {
                     }
                     if let previousSnapshot {
                         await notificationService.deliver(
-                            PipoNotificationPlanner.changes(from: previousSnapshot, to: snapshot)
+                            PipoNotificationPlanner.changes(from: previousSnapshot, to: snapshot, settings: settings)
                         )
                     }
+                    await notificationService.scheduleDeadlineReminders(
+                        for: snapshot.sections.dueSoon + snapshot.sections.newAssignments,
+                        settings: settings
+                    )
                 }
             }
         } catch {
@@ -301,12 +317,32 @@ public final class PipoModel {
         try await calendarService.requestAccess()
     }
 
+    public var calendarAuthorizationDescription: String {
+        switch calendarService.authorizationStatus() {
+        case .fullAccess: "Full access"
+        case .writeOnly: "Add events only"
+        case .denied: "Denied"
+        case .restricted: "Restricted"
+        case .notDetermined: "Not requested"
+        @unknown default: "Unknown"
+        }
+    }
+
     public func addToCalendar(_ item: DashboardItem) async throws {
         try await calendarService.add(item)
     }
 
     private func applyLocalState() {
         snapshot = rawSnapshot?.applyingLocalState(localState)
+    }
+
+    private var allDashboardItems: [DashboardItem] {
+        guard let rawSnapshot else { return [] }
+        return rawSnapshot.sections.dueSoon
+            + rawSnapshot.sections.newAssignments
+            + rawSnapshot.schedule
+            + rawSnapshot.announcements
+            + rawSnapshot.resources
     }
 
     private static func cacheKeyData(store: any PipoTokenStore) -> Data {
@@ -324,6 +360,10 @@ public final class PipoModel {
         defaults.set(settings.reminderHourBefore, forKey: "pipo.reminders.hour-before")
         defaults.set(settings.quietHoursStart, forKey: "pipo.quiet-hours.start")
         defaults.set(settings.quietHoursEnd, forKey: "pipo.quiet-hours.end")
+        defaults.set(settings.assignmentNotifications, forKey: "pipo.notifications.assignments")
+        defaults.set(settings.announcementNotifications, forKey: "pipo.notifications.announcements")
+        defaults.set(settings.messageNotifications, forKey: "pipo.notifications.messages")
+        defaults.set(settings.gradeNotifications, forKey: "pipo.notifications.grades")
     }
 }
 

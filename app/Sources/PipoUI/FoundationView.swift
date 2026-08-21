@@ -3,6 +3,7 @@ import Foundation
 import PipoAppCore
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 public enum PipoTab: String, CaseIterable, Identifiable {
     case today
@@ -405,6 +406,13 @@ public struct PipoUIConfiguration {
     public var addToCalendar: (@MainActor (PipoCalendarEntry) -> Void)?
     public var snooze: (@MainActor (String, Date?) -> Void)?
     public var markSeen: (@MainActor (String) -> Void)?
+    public var undoSeen: (@MainActor (String) -> Void)?
+    public var setPinnedCourse: (@MainActor (String, Bool) -> Void)?
+    public var setHiddenCourse: (@MainActor (String, Bool) -> Void)?
+    public var seenIDs: @MainActor () -> Set<String>
+    public var snoozedIDs: @MainActor () -> Set<String>
+    public var pinnedCourseIDs: @MainActor () -> Set<String>
+    public var hiddenCourseIDs: @MainActor () -> Set<String>
 
     public init(
         modelBacked: Bool = false,
@@ -422,7 +430,14 @@ public struct PipoUIConfiguration {
         exportDiagnostics: (@MainActor () -> Void)? = nil,
         addToCalendar: (@MainActor (PipoCalendarEntry) -> Void)? = nil,
         snooze: (@MainActor (String, Date?) -> Void)? = nil,
-        markSeen: (@MainActor (String) -> Void)? = nil
+        markSeen: (@MainActor (String) -> Void)? = nil,
+        undoSeen: (@MainActor (String) -> Void)? = nil,
+        setPinnedCourse: (@MainActor (String, Bool) -> Void)? = nil,
+        setHiddenCourse: (@MainActor (String, Bool) -> Void)? = nil,
+        seenIDs: @escaping @MainActor () -> Set<String> = { [] },
+        snoozedIDs: @escaping @MainActor () -> Set<String> = { [] },
+        pinnedCourseIDs: @escaping @MainActor () -> Set<String> = { [] },
+        hiddenCourseIDs: @escaping @MainActor () -> Set<String> = { [] }
     ) {
         self.modelBacked = modelBacked
         self.initialPhase = initialPhase
@@ -440,6 +455,13 @@ public struct PipoUIConfiguration {
         self.addToCalendar = addToCalendar
         self.snooze = snooze
         self.markSeen = markSeen
+        self.undoSeen = undoSeen
+        self.setPinnedCourse = setPinnedCourse
+        self.setHiddenCourse = setHiddenCourse
+        self.seenIDs = seenIDs
+        self.snoozedIDs = snoozedIDs
+        self.pinnedCourseIDs = pinnedCourseIDs
+        self.hiddenCourseIDs = hiddenCourseIDs
     }
 
     public init(model: PipoModel, installUpdate: (@MainActor () -> Void)? = nil) {
@@ -457,8 +479,8 @@ public struct PipoUIConfiguration {
                 await model.refresh(force: true)
                 return model.snapshot.map(Self.snapshot(from:))
             },
-            refreshSection: { _ in
-                await model.refresh(force: true)
+            refreshSection: { section in
+                await model.refresh(force: true, sections: [section])
                 return model.snapshot.map(Self.snapshot(from:))
             },
             signOut: {
@@ -478,8 +500,47 @@ public struct PipoUIConfiguration {
                     ))
                 }
             },
-            installUpdate: installUpdate
+            installUpdate: installUpdate,
+            clearCache: { await model.clearCache() },
+            exportDiagnostics: { exportDiagnostics(model) },
+            addToCalendar: { entry in
+                let item = DashboardItem(
+                    id: entry.id,
+                    kind: "calendar",
+                    title: entry.title,
+                    courseName: entry.courseName,
+                    timestamp: ISO8601DateFormatter().string(from: entry.startsAt),
+                    destination: entry.destination?.absoluteString ?? ""
+                )
+                Task { @MainActor in try? await model.addToCalendar(item) }
+            },
+            snooze: { id, date in
+                Task { @MainActor in await model.snooze(id, until: date ?? .now.addingTimeInterval(3_600)) }
+            },
+            markSeen: { id in Task { @MainActor in await model.markSeen(id) } },
+            undoSeen: { id in Task { @MainActor in await model.undoSeen(id) } },
+            setPinnedCourse: { id, pinned in
+                guard let id = Int(id) else { return }
+                Task { @MainActor in await model.setPinnedCourse(id, pinned: pinned) }
+            },
+            setHiddenCourse: { id, hidden in
+                guard let id = Int(id) else { return }
+                Task { @MainActor in await model.setHiddenCourse(id, hidden: hidden) }
+            },
+            seenIDs: { model.localState.seenIDs },
+            snoozedIDs: { Set(model.localState.snoozedUntil.filter { $0.value > .now }.keys) },
+            pinnedCourseIDs: { Set(model.localState.pinnedCourseIDs.map(String.init)) },
+            hiddenCourseIDs: { Set(model.localState.hiddenCourseIDs.map(String.init)) }
         )
+    }
+
+    private static func exportDiagnostics(_ model: PipoModel) {
+        guard let diagnostics = model.diagnostics(), let data = try? diagnostics.encoded() else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "pipo-diagnostics.json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? data.write(to: url, options: .atomic)
     }
 
     private static func phase(for phase: PipoPhase) -> PipoUIPhase {
