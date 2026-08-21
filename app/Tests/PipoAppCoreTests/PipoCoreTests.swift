@@ -267,6 +267,32 @@ import Testing
     #expect(backend.readAccounts.count > readsAfterDenial)
 }
 
+@Test func encryptedDashboardCacheDiscardsCiphertextFromPreviousKey() async throws {
+    let url = temporaryDatabaseURL("dashboard-key-rotation")
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let oldCache = try EncryptedDashboardCache(databaseURL: url, keyData: Data(repeating: 1, count: 32))
+    try await oldCache.save(sampleSnapshot())
+
+    let migratedCache = try EncryptedDashboardCache(databaseURL: url, keyData: Data(repeating: 2, count: 32))
+    #expect(try await migratedCache.load() == nil)
+    #expect(try await migratedCache.load() == nil)
+}
+
+@Test func encryptedLocalStateDiscardsCiphertextFromPreviousKey() async throws {
+    let url = temporaryDatabaseURL("state-key-rotation")
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let oldStore = try EncryptedLocalStateStore(databaseURL: url, keyData: Data(repeating: 3, count: 32))
+    var state = PipoLocalState()
+    state.seenIDs.insert("seen-item")
+    try await oldStore.save(state)
+
+    let migratedStore = try EncryptedLocalStateStore(databaseURL: url, keyData: Data(repeating: 4, count: 32))
+    #expect(try await migratedStore.load() == PipoLocalState())
+    #expect(try await migratedStore.load() == PipoLocalState())
+}
+
 @MainActor
 @Test func modelExposesSecureStorageStatusAndExplicitRetry() async {
     let backend = TestKeychainBackend()
@@ -292,6 +318,12 @@ import Testing
 
 private func sampleSnapshot() -> DashboardSnapshot {
     DashboardSnapshot(generatedAt: "now", siteName: "LPU", studentName: "Alex", sections: DashboardSections(), courses: [Course(id: 12, name: "History")])
+}
+
+private func temporaryDatabaseURL(_ name: String) -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("pipo-tests-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("\(name).sqlite")
 }
 
 private struct FailingTransport: PipoSidecarTransport {

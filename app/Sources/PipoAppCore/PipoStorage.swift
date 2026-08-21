@@ -285,9 +285,18 @@ public actor EncryptedDashboardCache: DashboardCache {
     public func load() throws -> DashboardSnapshot? {
         let encrypted: Data? = try database.read { database in try Data.fetchOne(database, sql: "SELECT payload FROM pipo_cache WHERE id = 1") }
         guard let encrypted else { return nil }
-        let box = try AES.GCM.SealedBox(combined: encrypted)
-        let data = try AES.GCM.open(box, using: key)
-        return try JSONDecoder().decode(DashboardSnapshot.self, from: data).privacyProjected()
+        do {
+            let box = try AES.GCM.SealedBox(combined: encrypted)
+            let data = try AES.GCM.open(box, using: key)
+            return try JSONDecoder().decode(DashboardSnapshot.self, from: data).privacyProjected()
+        } catch {
+            // Cache data is disposable. A key rotation or interrupted migration
+            // must not block sign-in or surface a CryptoKit error to the user.
+            try database.write { database in
+                try database.execute(sql: "DELETE FROM pipo_cache")
+            }
+            return nil
+        }
     }
 
     public func save(_ snapshot: DashboardSnapshot) throws {

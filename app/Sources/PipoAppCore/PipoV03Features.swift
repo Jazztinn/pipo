@@ -30,8 +30,17 @@ public actor EncryptedLocalStateStore {
             try Data.fetchOne(db, sql: "SELECT payload FROM pipo_local_state WHERE id = 1")
         }
         guard let encrypted else { return PipoLocalState() }
-        let box = try AES.GCM.SealedBox(combined: encrypted)
-        return try JSONDecoder().decode(PipoLocalState.self, from: AES.GCM.open(box, using: key))
+        do {
+            let box = try AES.GCM.SealedBox(combined: encrypted)
+            return try JSONDecoder().decode(PipoLocalState.self, from: AES.GCM.open(box, using: key))
+        } catch {
+            // Local interaction state can be rebuilt. Clear stale ciphertext
+            // after a Keychain vault migration instead of blocking startup.
+            try database.write { db in
+                try db.execute(sql: "DELETE FROM pipo_local_state")
+            }
+            return PipoLocalState()
+        }
     }
 
     public func save(_ state: PipoLocalState) throws {
