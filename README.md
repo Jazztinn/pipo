@@ -32,7 +32,8 @@ cargo test --workspace --manifest-path rust/Cargo.toml
 Run the local menu-bar beta:
 
 ```sh
-swift run PipoApp
+cargo build --manifest-path rust/Cargo.toml --bin pipo-core
+PIPO_CORE_PATH="$PWD/rust/target/debug/pipo-core" swift run PipoApp
 ```
 
 Live LMS verification requires credentials entered locally. Never place LMS
@@ -46,4 +47,3 @@ and Sparkle release publishing follow beta acceptance.
 ## License
 
 MIT. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
