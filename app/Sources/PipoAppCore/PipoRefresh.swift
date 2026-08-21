@@ -72,7 +72,18 @@ public actor DashboardRefreshCoordinator {
         let failures = refreshed.failures + cached.failures.filter { failure in
             !requested.contains { failure.localizedCaseInsensitiveContains($0.replacingOccurrences(of: "_", with: " ")) }
         }
-        return DashboardSnapshot(version: refreshed.version, generatedAt: refreshed.generatedAt, siteName: refreshed.siteName, studentName: refreshed.studentName, sections: sections, supported: refreshed.supported, assignmentIDs: has("assignments") ? refreshed.assignmentIDs : cached.assignmentIDs, courses: refreshed.courses.isEmpty ? cached.courses : refreshed.courses, failures: failures, nextUp: nextUp, schedule: schedule, announcements: announcements, resources: resources, sectionTimestamps: timestamps)
+        let cachedCourses = Dictionary(uniqueKeysWithValues: cached.courses.map { ($0.id, $0) })
+        let courses = refreshed.courses.isEmpty ? cached.courses : refreshed.courses.map { course in
+            guard let cachedCourse = cachedCourses[course.id] else { return course }
+            return Course(
+                id: course.id,
+                name: course.name,
+                shortName: course.shortName ?? cachedCourse.shortName,
+                publishedTotal: has("grades") ? course.publishedTotal : cachedCourse.publishedTotal,
+                upcomingCount: has("due_soon") ? course.upcomingCount : cachedCourse.upcomingCount
+            )
+        }
+        return DashboardSnapshot(version: refreshed.version, generatedAt: refreshed.generatedAt, siteName: refreshed.siteName, studentName: refreshed.studentName, sections: sections, supported: refreshed.supported, assignmentIDs: has("assignments") ? refreshed.assignmentIDs : cached.assignmentIDs, courses: courses, failures: failures, nextUp: nextUp, schedule: schedule, announcements: announcements, resources: resources, sectionTimestamps: timestamps)
     }
 }
 

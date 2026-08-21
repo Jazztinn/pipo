@@ -212,7 +212,9 @@ impl MoodleClient {
             .filter_map(|item| item.get("name").or(Some(item)).and_then(Value::as_str))
             .map(str::to_owned)
             .collect::<Vec<_>>();
-        Ok(json!({ "site": safe_site(&site), "functions": functions, "read_only": true }))
+        Ok(
+            json!({ "site": safe_site(&site), "functions": functions, "supported": capability_support(&site), "read_only": true }),
+        )
     }
 
     pub async fn refresh_dashboard(
@@ -490,23 +492,21 @@ impl MoodleClient {
             courses_with_grades = courses.clone();
         }
 
-        let announcements = if requested.contains("announcements") {
-            self.dashboard_announcements(token, &courses, &capabilities, &mut failures)
-                .await
-        } else {
-            Vec::new()
-        };
+        let (announcements, resources) = self
+            .dashboard_content(
+                token,
+                &courses,
+                requested.contains("announcements"),
+                requested.contains("resources"),
+                &capabilities,
+                &mut failures,
+            )
+            .await;
         if requested.contains("announcements")
             && capabilities.contains("mod_forum_get_forum_discussions_paginated")
         {
             section_timestamps.insert("announcements".to_owned(), Value::String(rfc3339_now()));
         }
-        let resources = if requested.contains("resources") {
-            self.dashboard_resources(token, &courses, &capabilities, &mut failures)
-                .await
-        } else {
-            Vec::new()
-        };
         if requested.contains("resources") && capabilities.contains("core_course_get_contents") {
             section_timestamps.insert("resources".to_owned(), Value::String(rfc3339_now()));
         }
@@ -538,17 +538,7 @@ impl MoodleClient {
             "announcements": announcements,
             "resources": resources,
             "section_timestamps": section_timestamps,
-            "supported": {
-                "due_soon": capabilities.contains("core_calendar_get_action_events_by_timesort"),
-                "notifications": capabilities.contains("message_popup_get_popup_notifications"),
-                "assignments": capabilities.contains("mod_assign_get_assignments"),
-                "messages": capabilities.contains("core_message_get_conversations"),
-                "grades": capabilities.contains("gradereport_user_get_grade_items"),
-                "submission_status": capabilities.contains("mod_assign_get_submission_status"),
-                "announcements": capabilities.contains("mod_forum_get_forum_discussions_paginated"),
-                "resources": capabilities.contains("core_course_get_contents"),
-                "schedule": capabilities.contains("core_calendar_get_action_events_by_timesort")
-            },
+            "supported": capability_support(&site),
             "assignment_ids": assignment_ids,
             "courses": courses_with_counts,
             "failures": failures
@@ -644,19 +634,39 @@ impl MoodleClient {
 
         let supports_announcements = capabilities.contains("core_course_get_contents")
             && capabilities.contains("mod_forum_get_forum_discussions_paginated");
-        let announcements = self
-            .course_announcements(
-                token,
-                course_id,
-                &course,
-                supports_announcements,
-                &mut failures,
-            )
-            .await;
         let supports_resources = capabilities.contains("core_course_get_contents");
-        let resources = self
-            .course_resources(token, course_id, &course, supports_resources, &mut failures)
-            .await;
+        let contents = if supports_announcements || supports_resources {
+            match self
+                .call(
+                    token,
+                    "core_course_get_contents",
+                    json!({ "courseid": course_id }),
+                )
+                .await
+            {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    failures.push(section_failure("Course content", &error));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let announcements = match contents.as_ref() {
+            Some(contents) if supports_announcements => {
+                self.announcements_from_contents(token, contents, &course, &mut failures)
+                    .await
+            }
+            _ => Vec::new(),
+        };
+        let resources = match contents.as_ref() {
+            Some(contents) if supports_resources => resource_items(contents, &course)
+                .into_iter()
+                .take(RESOURCE_LIMIT)
+                .collect(),
+            _ => Vec::new(),
+        };
 
         Ok(json!({
             "version": PROTOCOL_VERSION,
@@ -734,35 +744,62 @@ impl MoodleClient {
         }
     }
 
-    async fn dashboard_announcements(
+    async fn dashboard_content(
         &self,
         token: &str,
         courses: &[Value],
+        wants_announcements: bool,
+        wants_resources: bool,
         capabilities: &HashSet<String>,
         failures: &mut Vec<String>,
-    ) -> Vec<Value> {
-        if !capabilities.contains("core_course_get_contents")
-            || !capabilities.contains("mod_forum_get_forum_discussions_paginated")
+    ) -> (Vec<Value>, Vec<Value>) {
+        if !wants_announcements && !wants_resources
+            || !capabilities.contains("core_course_get_contents")
         {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
-        let mut output = Vec::new();
+        let supports_announcements = wants_announcements
+            && capabilities.contains("mod_forum_get_forum_discussions_paginated");
+        let mut announcements = Vec::new();
+        let mut resources = Vec::new();
         for course in courses {
-            if output.len() >= ANNOUNCEMENT_LIMIT {
+            if announcements.len() >= ANNOUNCEMENT_LIMIT && resources.len() >= RESOURCE_LIMIT {
                 break;
             }
-            let course_id = match course.get("id").and_then(Value::as_i64) {
-                Some(value) => value,
-                None => continue,
+            let Some(course_id) = course.get("id").and_then(Value::as_i64) else {
+                continue;
             };
-            output.extend(
-                self.course_announcements(token, course_id, course, true, failures)
-                    .await
-                    .into_iter()
-                    .take(ANNOUNCEMENT_LIMIT - output.len()),
-            );
+            let contents = match self
+                .call(
+                    token,
+                    "core_course_get_contents",
+                    json!({ "courseid": course_id }),
+                )
+                .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    failures.push(section_failure("Course content", &error));
+                    continue;
+                }
+            };
+            if supports_announcements && announcements.len() < ANNOUNCEMENT_LIMIT {
+                announcements.extend(
+                    self.announcements_from_contents(token, &contents, course, failures)
+                        .await
+                        .into_iter()
+                        .take(ANNOUNCEMENT_LIMIT - announcements.len()),
+                );
+            }
+            if wants_resources && resources.len() < RESOURCE_LIMIT {
+                resources.extend(
+                    resource_items(&contents, course)
+                        .into_iter()
+                        .take(RESOURCE_LIMIT - resources.len()),
+                );
+            }
         }
-        output.sort_by_key(|item| {
+        announcements.sort_by_key(|item| {
             std::cmp::Reverse(
                 item.get("timestamp")
                     .and_then(Value::as_str)
@@ -770,35 +807,17 @@ impl MoodleClient {
                     .to_owned(),
             )
         });
-        output
+        (announcements, resources)
     }
 
-    async fn course_announcements(
+    async fn announcements_from_contents(
         &self,
         token: &str,
-        course_id: i64,
+        contents: &Value,
         course: &Value,
-        supported: bool,
         failures: &mut Vec<String>,
     ) -> Vec<Value> {
-        if !supported {
-            return Vec::new();
-        }
-        let contents = match self
-            .call(
-                token,
-                "core_course_get_contents",
-                json!({ "courseid": course_id }),
-            )
-            .await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                failures.push(section_failure("Announcements", &error));
-                return Vec::new();
-            }
-        };
-        let forums = forum_modules(&contents);
+        let forums = forum_modules(contents);
         let mut output = Vec::new();
         for forum in forums {
             if output.len() >= ANNOUNCEMENT_LIMIT {
@@ -814,66 +833,6 @@ impl MoodleClient {
             }
         }
         output
-    }
-
-    async fn dashboard_resources(
-        &self,
-        token: &str,
-        courses: &[Value],
-        capabilities: &HashSet<String>,
-        failures: &mut Vec<String>,
-    ) -> Vec<Value> {
-        if !capabilities.contains("core_course_get_contents") {
-            return Vec::new();
-        }
-        let mut output = Vec::new();
-        for course in courses {
-            if output.len() >= RESOURCE_LIMIT {
-                break;
-            }
-            let course_id = match course.get("id").and_then(Value::as_i64) {
-                Some(value) => value,
-                None => continue,
-            };
-            output.extend(
-                self.course_resources(token, course_id, course, true, failures)
-                    .await
-                    .into_iter()
-                    .take(RESOURCE_LIMIT - output.len()),
-            );
-        }
-        output
-    }
-
-    async fn course_resources(
-        &self,
-        token: &str,
-        course_id: i64,
-        course: &Value,
-        supported: bool,
-        failures: &mut Vec<String>,
-    ) -> Vec<Value> {
-        if !supported {
-            return Vec::new();
-        }
-        let contents = match self
-            .call(
-                token,
-                "core_course_get_contents",
-                json!({ "courseid": course_id }),
-            )
-            .await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                failures.push(section_failure("Resources", &error));
-                return Vec::new();
-            }
-        };
-        resource_items(&contents, course)
-            .into_iter()
-            .take(RESOURCE_LIMIT)
-            .collect()
     }
 
     pub fn resolve_destination(&self, destination: &str) -> Result<Value, CoreError> {
@@ -1142,6 +1101,20 @@ fn capabilities(site: &Value) -> HashSet<String> {
         .filter_map(|item| item.get("name").or(Some(item)).and_then(Value::as_str))
         .map(str::to_owned)
         .collect()
+}
+fn capability_support(site: &Value) -> Value {
+    let available = capabilities(site);
+    json!({
+        "due_soon": available.contains("core_calendar_get_action_events_by_timesort"),
+        "schedule": available.contains("core_calendar_get_action_events_by_timesort"),
+        "notifications": available.contains("message_popup_get_popup_notifications"),
+        "assignments": available.contains("mod_assign_get_assignments"),
+        "submission_status": available.contains("mod_assign_get_submission_status"),
+        "announcements": available.contains("core_course_get_contents") && available.contains("mod_forum_get_forum_discussions_paginated"),
+        "messages": available.contains("core_message_get_conversations"),
+        "grades": available.contains("gradereport_user_get_grade_items"),
+        "resources": available.contains("core_course_get_contents")
+    })
 }
 fn safe_site(site: &Value) -> Value {
     json!({ "site_name": site.get("sitename"), "student_name": site.get("fullname"), "user_id": site.get("userid"), "site_url": LMS_ORIGIN })

@@ -1,16 +1,26 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 3 ]; then
-  echo "usage: $0 VERSION /path/to/Pipo.zip /path/to/Sparkle/bin"
+if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
+  echo "usage: $0 VERSION /path/to/Pipo.zip /path/to/Sparkle/bin [stable|beta]"
   exit 64
 fi
 
 VERSION=$1
 ARCHIVE=$2
 SPARKLE_BIN=$3
+CHANNEL=${4:-stable}
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TAG="v$VERSION"
+APPCAST="$ROOT/appcast.xml"
+CHANNEL_ARGS=""
+if [ "$CHANNEL" = "beta" ]; then
+  APPCAST="$ROOT/appcast-beta.xml"
+  CHANNEL_ARGS="--channel beta"
+elif [ "$CHANNEL" != "stable" ]; then
+  echo "channel must be stable or beta"
+  exit 64
+fi
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/pipo-release.XXXXXX")
 EXTRACTED="$WORK/extracted"
 UPDATES="$WORK/updates"
@@ -29,7 +39,8 @@ test -d "$EXTRACTED/Pipo.app"
   --download-url-prefix "https://github.com/Jazztinn/pipo/releases/download/$TAG/" \
   --link "https://github.com/Jazztinn/pipo" \
   --maximum-deltas 0 \
-  -o "$ROOT/appcast.xml" \
+  $CHANNEL_ARGS \
+  -o "$APPCAST" \
   "$UPDATES"
 
 gh release create "$TAG" \
@@ -39,4 +50,4 @@ gh release create "$TAG" \
   --title "Pipo $VERSION" \
   --generate-notes
 
-echo "Published $TAG. Commit and push appcast.xml to activate the update."
+echo "Published $TAG. Commit and push $(basename "$APPCAST") to activate the update."
