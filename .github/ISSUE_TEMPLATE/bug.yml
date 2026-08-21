@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible Pipo problem without account data.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never include LMS credentials, grades, messages, or student IDs.
+  - type: input
+    id: version
+    attributes:
+      label: Pipo version
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+
