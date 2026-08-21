@@ -217,6 +217,79 @@ import Testing
     #expect(tokenStore.readCount == 1)
 }
 
+@Test func secureVaultMigratesLegacyTokenWithoutReadingLegacyCacheKey() throws {
+    let backend = TestKeychainBackend()
+    backend.set(Data("legacy-token".utf8), account: "lms-access-token")
+    backend.set(Data(Data(repeating: 4, count: 32).base64EncodedString().utf8), account: "pipo-cache-key")
+    let vault = KeychainSecureVault(backend: backend)
+
+    #expect(try vault.token() == "legacy-token")
+    let vaultCacheKey = try vault.cacheKey()
+    #expect(vaultCacheKey.count == 32)
+    #expect(vaultCacheKey != Data(repeating: 4, count: 32))
+    #expect(backend.readAccounts == ["secure-vault-v1", "lms-access-token"])
+    #expect(!backend.readAccounts.contains("pipo-cache-key"))
+    #expect(backend.data(account: "secure-vault-v1") != nil)
+    #expect(backend.data(account: "lms-access-token") == nil)
+    #expect(backend.data(account: "pipo-cache-key") != nil)
+
+    let readsAfterMigration = backend.readAccounts.count
+    _ = try vault.token()
+    _ = try vault.cacheKey()
+    #expect(backend.readAccounts.count == readsAfterMigration)
+}
+
+@Test func secureVaultDoesNotRetryDeniedKeychainUntilExplicitRetry() throws {
+    let backend = TestKeychainBackend()
+    backend.deniesAccess = true
+    let vault = KeychainSecureVault(backend: backend)
+
+    do {
+        _ = try vault.token()
+        Issue.record("Expected secure storage denial")
+    } catch {
+        #expect(error as? PipoSecureStorageError == .accessDenied)
+    }
+    let readsAfterDenial = backend.readAccounts.count
+
+    do {
+        _ = try vault.token()
+        Issue.record("Expected cached secure storage denial")
+    } catch {
+        #expect(error as? PipoSecureStorageError == .accessDenied)
+    }
+    #expect(backend.readAccounts.count == readsAfterDenial)
+    #expect(vault.status == .accessDenied)
+
+    backend.deniesAccess = false
+    #expect(vault.retryAccess() == .ready)
+    #expect(vault.status == .ready)
+    #expect(backend.readAccounts.count > readsAfterDenial)
+}
+
+@MainActor
+@Test func modelExposesSecureStorageStatusAndExplicitRetry() async {
+    let backend = TestKeychainBackend()
+    backend.deniesAccess = true
+    let vault = KeychainSecureVault(backend: backend)
+    let cache = InMemoryDashboardCache()
+    let model = PipoModel(
+        transport: FailingTransport(),
+        tokenStore: vault,
+        secureVault: vault,
+        refreshCoordinator: DashboardRefreshCoordinator(transport: FailingTransport(), cache: cache),
+        notificationService: NoopNotificationService(),
+        urlOpener: { _ in }
+    )
+
+    await model.refresh()
+    #expect(model.secureStorageStatus == .accessDenied)
+    backend.deniesAccess = false
+    let retryStatus = await model.retrySecureStorage()
+    #expect(retryStatus == .ready)
+    #expect(model.secureStorageStatus == .ready)
+}
+
 private func sampleSnapshot() -> DashboardSnapshot {
     DashboardSnapshot(generatedAt: "now", siteName: "LPU", studentName: "Alex", sections: DashboardSections(), courses: [Course(id: 12, name: "History")])
 }
@@ -246,4 +319,42 @@ private final class TestTokenStore: PipoTokenStore, @unchecked Sendable {
     func token() throws -> String? { readCount += 1; return value }
     func save(token: String) throws { value = token }
     func deleteToken() throws { value = nil }
+}
+
+private final class TestKeychainBackend: PipoKeychainBackend, @unchecked Sendable {
+    var deniesAccess = false
+    private var values: [String: Data] = [:]
+    private(set) var readAccounts: [String] = []
+
+    func read(service: String, account: String) throws -> Data? {
+        readAccounts.append(account)
+        try checkAccess()
+        return values[key(service: service, account: account)]
+    }
+
+    func write(_ data: Data, service: String, account: String) throws {
+        try checkAccess()
+        values[key(service: service, account: account)] = data
+    }
+
+    func delete(service: String, account: String) throws {
+        try checkAccess()
+        values.removeValue(forKey: key(service: service, account: account))
+    }
+
+    func set(_ data: Data, account: String, service: String = "com.jazztinn.pipo") {
+        values[key(service: service, account: account)] = data
+    }
+
+    func data(account: String, service: String = "com.jazztinn.pipo") -> Data? {
+        values[key(service: service, account: account)]
+    }
+
+    private func checkAccess() throws {
+        if deniesAccess { throw PipoSecureStorageError.accessDenied }
+    }
+
+    private func key(service: String, account: String) -> String {
+        "\(service)::\(account)"
+    }
 }

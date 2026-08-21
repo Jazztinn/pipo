@@ -10,6 +10,7 @@ public final class PipoModel {
     public var selectedTab: PipoTab = .dashboard
     public private(set) var snapshot: DashboardSnapshot?
     public private(set) var refreshDate: Date?
+    public private(set) var secureStorageStatus: PipoSecureStorageStatus
     public var settings: PipoSettings {
         didSet { Self.persist(settings: settings) }
     }
@@ -19,6 +20,7 @@ public final class PipoModel {
     private let transport: any PipoSidecarTransport
     private let tokenStore: any PipoTokenStore
     private let cacheKeyStore: (any PipoTokenStore)?
+    private let secureVault: KeychainSecureVault?
     private let refreshCoordinator: DashboardRefreshCoordinator
     private let notificationService: any PipoNotificationService
     private let urlOpener: (URL) -> Void
@@ -32,10 +34,12 @@ public final class PipoModel {
     @ObservationIgnored private var sessionToken: String?
     @ObservationIgnored private var hasLoadedStoredToken = false
 
-    public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, refreshCoordinator: DashboardRefreshCoordinator, localStateStore: EncryptedLocalStateStore? = nil, settings: PipoSettings = PipoSettings(), notificationService: any PipoNotificationService = PipoSystemNotifications(), calendarService: any PipoCalendarService = PipoEventKitCalendar(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
+    public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, secureVault: KeychainSecureVault? = nil, refreshCoordinator: DashboardRefreshCoordinator, localStateStore: EncryptedLocalStateStore? = nil, settings: PipoSettings = PipoSettings(), notificationService: any PipoNotificationService = PipoSystemNotifications(), calendarService: any PipoCalendarService = PipoEventKitCalendar(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
         self.transport = transport
         self.tokenStore = tokenStore
         self.cacheKeyStore = cacheKeyStore
+        self.secureVault = secureVault
+        self.secureStorageStatus = secureVault?.status ?? .ready
         self.refreshCoordinator = refreshCoordinator
         self.localStateStore = localStateStore
         self.settings = settings
@@ -45,8 +49,7 @@ public final class PipoModel {
     }
 
     public static func live() -> PipoModel {
-        let store = KeychainTokenStore()
-        let cacheKeyStore = KeychainTokenStore(account: "pipo-cache-key")
+        let vault = KeychainSecureVault()
         let defaults = UserDefaults.standard
         let savedRefreshMinutes = defaults.object(forKey: "pipo.refresh.minutes") as? Double ?? 15
         let savedNotifications = defaults.object(forKey: "pipo.notifications.enabled") as? Bool ?? true
@@ -68,13 +71,20 @@ public final class PipoModel {
         )
         let cacheURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Pipo/dashboard.sqlite", isDirectory: false)
         try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let cacheKey = cacheKeyData(store: cacheKeyStore)
-        let cache: any DashboardCache = (try? EncryptedDashboardCache(databaseURL: cacheURL, keyData: cacheKey)) ?? InMemoryDashboardCache()
-        let localStateStore = try? EncryptedLocalStateStore(databaseURL: cacheURL, keyData: cacheKey)
+        let cacheKey = try? vault.cacheKey()
+        let cache: any DashboardCache
+        let localStateStore: EncryptedLocalStateStore?
+        if let cacheKey {
+            cache = (try? EncryptedDashboardCache(databaseURL: cacheURL, keyData: cacheKey)) ?? InMemoryDashboardCache()
+            localStateStore = try? EncryptedLocalStateStore(databaseURL: cacheURL, keyData: cacheKey)
+        } else {
+            cache = InMemoryDashboardCache()
+            localStateStore = nil
+        }
         return PipoModel(
             transport: PipoCoreProcessTransport(),
-            tokenStore: store,
-            cacheKeyStore: cacheKeyStore,
+            tokenStore: vault,
+            secureVault: vault,
             refreshCoordinator: DashboardRefreshCoordinator(transport: PipoCoreProcessTransport(), cache: cache),
             localStateStore: localStateStore,
             settings: settings
@@ -118,7 +128,9 @@ public final class PipoModel {
         do {
             let response = try await transport.send(SidecarRequest(method: "authenticate_with_password", params: ["username": .string(username), "password": .string(password)]))
             let token = try token(from: response)
+            try prepareSecureStorageForUserAction()
             try tokenStore.save(token: token)
+            updateSecureStorageStatus()
             sessionToken = token
             hasLoadedStoredToken = true
             await refresh(using: token, force: true)
@@ -132,7 +144,9 @@ public final class PipoModel {
         authenticationError = nil
         do {
             _ = try await transport.send(SidecarRequest(method: "authenticate_with_token", params: ["token": .string(token)]))
+            try prepareSecureStorageForUserAction()
             try tokenStore.save(token: token)
+            updateSecureStorageStatus()
             sessionToken = token
             hasLoadedStoredToken = true
             await refresh(using: token, force: true)
@@ -175,7 +189,11 @@ public final class PipoModel {
             try await refreshCoordinator.clearCache()
             try await localStateStore?.delete()
         }
-        catch { fail(error); return }
+        catch {
+            updateSecureStorageStatus()
+            fail(error)
+            return
+        }
         snapshot = nil
         rawSnapshot = nil
         refreshDate = nil
@@ -188,6 +206,20 @@ public final class PipoModel {
         localState = PipoLocalState()
         sessionToken = nil
         hasLoadedStoredToken = true
+        updateSecureStorageStatus()
+    }
+
+    @discardableResult
+    public func retrySecureStorage() async -> PipoSecureStorageStatus {
+        guard let secureVault else {
+            secureStorageStatus = .ready
+            return .ready
+        }
+        secureStorageStatus = secureVault.retryAccess()
+        guard case .ready = secureStorageStatus else { return secureStorageStatus }
+        hasLoadedStoredToken = false
+        if storedToken() != nil { await restore() } else { phase = .signedOut }
+        return secureStorageStatus
     }
 
     public func markSeen(_ id: String) async {
@@ -309,8 +341,10 @@ public final class PipoModel {
         hasLoadedStoredToken = true
         do {
             sessionToken = try tokenStore.token()
+            updateSecureStorageStatus()
             return sessionToken
         } catch {
+            updateSecureStorageStatus()
             return nil
         }
     }
@@ -360,11 +394,22 @@ public final class PipoModel {
             + rawSnapshot.resources
     }
 
-    private static func cacheKeyData(store: any PipoTokenStore) -> Data {
-        if let stored = try? store.token(), let data = Data(base64Encoded: stored), data.count == 32 { return data }
-        let data = Data((0..<32).map { _ in UInt8.random(in: .min ... .max) })
-        try? store.save(token: data.base64EncodedString())
-        return data
+    private func prepareSecureStorageForUserAction() throws {
+        guard let secureVault else { return }
+        switch secureVault.retryAccess() {
+        case .ready:
+            secureStorageStatus = .ready
+        case .accessDenied:
+            secureStorageStatus = .accessDenied
+            throw PipoSecureStorageError.accessDenied
+        case .unavailable(let message):
+            secureStorageStatus = .unavailable(message)
+            throw PipoSecureStorageError.unavailable(message)
+        }
+    }
+
+    private func updateSecureStorageStatus() {
+        secureStorageStatus = secureVault?.status ?? .ready
     }
 
     private static func persist(settings: PipoSettings) {
