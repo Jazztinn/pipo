@@ -74,7 +74,7 @@ import Testing
     let tokenStore = TestTokenStore(token: "stored-token")
     let cacheKeyStore = TestTokenStore(token: "cache-key")
     let cache = InMemoryDashboardCache(snapshot: sampleSnapshot())
-    let model = PipoModel(transport: FailingTransport(), tokenStore: tokenStore, cacheKeyStore: cacheKeyStore, refreshCoordinator: DashboardRefreshCoordinator(transport: FailingTransport(), cache: cache), urlOpener: { _ in })
+    let model = PipoModel(transport: FailingTransport(), tokenStore: tokenStore, cacheKeyStore: cacheKeyStore, refreshCoordinator: DashboardRefreshCoordinator(transport: FailingTransport(), cache: cache), notificationService: NoopNotificationService(), urlOpener: { _ in })
     await model.signOut()
     let cachedAfterSignOut = try? await cache.load()
     #expect(tokenStore.value == nil)
@@ -89,6 +89,12 @@ private func sampleSnapshot() -> DashboardSnapshot {
 
 private struct FailingTransport: PipoSidecarTransport {
     func send(_ request: SidecarRequest) async throws -> SidecarResponse { throw PipoCoreError.operationFailed("token=secret-password") }
+}
+
+private struct NoopNotificationService: PipoNotificationService {
+    func requestAuthorization() async {}
+    func deliver(_ payloads: [PipoNotificationPayload]) async {}
+    func clear() {}
 }
 
 private final class TestTokenStore: PipoTokenStore, @unchecked Sendable {

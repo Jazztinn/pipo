@@ -16,16 +16,18 @@ public final class PipoModel {
     private let tokenStore: any PipoTokenStore
     private let cacheKeyStore: (any PipoTokenStore)?
     private let refreshCoordinator: DashboardRefreshCoordinator
+    private let notificationService: any PipoNotificationService
     private let urlOpener: (URL) -> Void
     @ObservationIgnored private var automaticRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var hasRequestedNotificationAccess = false
 
-    public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, refreshCoordinator: DashboardRefreshCoordinator, settings: PipoSettings = PipoSettings(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
+    public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, refreshCoordinator: DashboardRefreshCoordinator, settings: PipoSettings = PipoSettings(), notificationService: any PipoNotificationService = PipoSystemNotifications(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
         self.transport = transport
         self.tokenStore = tokenStore
         self.cacheKeyStore = cacheKeyStore
         self.refreshCoordinator = refreshCoordinator
         self.settings = settings
+        self.notificationService = notificationService
         self.urlOpener = urlOpener
     }
 
@@ -116,7 +118,7 @@ public final class PipoModel {
         refreshDate = nil
         authenticationError = nil
         hasRequestedNotificationAccess = false
-        PipoSystemNotifications.clear()
+        notificationService.clear()
         phase = .signedOut
         selectedTab = .dashboard
     }
@@ -134,10 +136,10 @@ public final class PipoModel {
                 if settings.notificationsEnabled, let snapshot {
                     if !hasRequestedNotificationAccess {
                         hasRequestedNotificationAccess = true
-                        await PipoSystemNotifications.requestAuthorization()
+                        await notificationService.requestAuthorization()
                     }
                     if let previousSnapshot {
-                        await PipoSystemNotifications.deliver(
+                        await notificationService.deliver(
                             PipoNotificationPlanner.changes(from: previousSnapshot, to: snapshot)
                         )
                     }

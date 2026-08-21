@@ -45,12 +45,20 @@ public enum PipoNotificationPlanner {
     }
 }
 
-public enum PipoSystemNotifications {
-    public static func requestAuthorization() async {
+public protocol PipoNotificationService: Sendable {
+    func requestAuthorization() async
+    func deliver(_ payloads: [PipoNotificationPayload]) async
+    func clear()
+}
+
+public struct PipoSystemNotifications: PipoNotificationService {
+    public init() {}
+
+    public func requestAuthorization() async {
         _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
     }
 
-    public static func deliver(_ payloads: [PipoNotificationPayload]) async {
+    public func deliver(_ payloads: [PipoNotificationPayload]) async {
         for payload in payloads {
             let content = UNMutableNotificationContent()
             content.title = payload.title
@@ -61,7 +69,7 @@ public enum PipoSystemNotifications {
         }
     }
 
-    public static func clear() {
+    public func clear() {
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
     }
