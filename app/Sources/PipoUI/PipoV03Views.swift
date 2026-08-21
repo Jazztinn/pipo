@@ -36,7 +36,7 @@ private struct PipoV03DisplayItem: Identifiable {
 }
 
 @MainActor
-private struct PipoV03TodayView: View {
+struct PipoV03TodayView: View {
     let phase: PipoUIPhase
     let snapshot: PipoDashboardSnapshot?
     let onRefresh: () -> Void
@@ -225,7 +225,7 @@ private struct PipoV03TodayView: View {
 }
 
 @MainActor
-private struct PipoV03CoursesView: View {
+struct PipoV03CoursesView: View {
     let phase: PipoUIPhase
     let courses: [PipoCourseItem]
     @Binding var selectedCourseID: String?
@@ -524,10 +524,10 @@ public struct PipoV03SettingsView: View {
             }
 
             Section("Capabilities") {
-                PipoV03CapabilityRow(title: "Schedule", supported: model.snapshot?.supported.dueSoon == true || model.snapshot?.featureSupport.schedule == true)
-                PipoV03CapabilityRow(title: "Submission status", supported: model.snapshot?.featureSupport.submissionStatus ?? true)
-                PipoV03CapabilityRow(title: "Announcements", supported: model.snapshot?.featureSupport.announcements ?? true)
-                PipoV03CapabilityRow(title: "Resources", supported: model.snapshot?.featureSupport.resources ?? true)
+                PipoV03CapabilityRow(title: "Schedule", supported: model.snapshot?.supported.schedule ?? false)
+                PipoV03CapabilityRow(title: "Submission status", supported: model.snapshot?.supported.submissionStatus ?? false)
+                PipoV03CapabilityRow(title: "Announcements", supported: model.snapshot?.supported.announcements ?? false)
+                PipoV03CapabilityRow(title: "Resources", supported: model.snapshot?.supported.resources ?? false)
                 if let failures = model.snapshot?.failures, !failures.isEmpty { Text(failures.map(\.section).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary) }
             }
 

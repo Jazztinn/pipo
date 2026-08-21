@@ -502,7 +502,7 @@ public struct PipoUIConfiguration {
             },
             installUpdate: installUpdate,
             clearCache: { await model.clearCache() },
-            exportDiagnostics: { exportDiagnostics(model) },
+            exportDiagnostics: { Self.exportDiagnostics(model) },
             addToCalendar: { entry in
                 let item = DashboardItem(
                     id: entry.id,
@@ -1318,7 +1318,7 @@ private struct PipoCourseDetailView: View {
 }
 
 @MainActor
-private struct PipoCourseGrades: View {
+struct PipoCourseGrades: View {
     let grades: [CourseGradeItem]
     let onOpenURL: (URL) -> Void
 
@@ -1574,7 +1574,7 @@ private struct PipoItemList: View {
 }
 
 @MainActor
-private struct PipoEmptyState: View {
+struct PipoEmptyState: View {
     let title: String
     let message: String
     let systemImage: String
@@ -1704,7 +1704,7 @@ private struct PipoSkeletonLine: View {
 }
 
 @MainActor
-private struct PipoStateBanner: View {
+struct PipoStateBanner: View {
     let title: String
     let message: String
     let systemImage: String
@@ -1728,7 +1728,7 @@ private struct PipoStateBanner: View {
 }
 
 @MainActor
-private struct PipoOfflineBanner: View {
+struct PipoOfflineBanner: View {
     let cachedAt: Date
     let onReconnect: () -> Void
 
