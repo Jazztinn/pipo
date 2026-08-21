@@ -81,7 +81,6 @@ public actor EncryptedDashboardCache: DashboardCache {
     public func delete() throws {
         try database.write { database in try database.execute(sql: "DELETE FROM pipo_cache") }
     }
-
 }
 
 extension Optional where Wrapped == Data {

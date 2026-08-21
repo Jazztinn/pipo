@@ -23,14 +23,14 @@ public final class PipoModel {
     private let notificationService: any PipoNotificationService
     private let urlOpener: (URL) -> Void
     private let localStateStore: EncryptedLocalStateStore?
+    private let calendarService: any PipoCalendarService
     @ObservationIgnored private var automaticRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var networkMonitor: NWPathMonitor?
     @ObservationIgnored private var hasRequestedNotificationAccess = false
     @ObservationIgnored private var consecutiveRefreshFailures = 0
     @ObservationIgnored private var rawSnapshot: DashboardSnapshot?
-    @ObservationIgnored private let calendarService: any PipoCalendarService = PipoEventKitCalendar()
 
-    public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, refreshCoordinator: DashboardRefreshCoordinator, localStateStore: EncryptedLocalStateStore? = nil, settings: PipoSettings = PipoSettings(), notificationService: any PipoNotificationService = PipoSystemNotifications(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
+    public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, refreshCoordinator: DashboardRefreshCoordinator, localStateStore: EncryptedLocalStateStore? = nil, settings: PipoSettings = PipoSettings(), notificationService: any PipoNotificationService = PipoSystemNotifications(), calendarService: any PipoCalendarService = PipoEventKitCalendar(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
         self.transport = transport
         self.tokenStore = tokenStore
         self.cacheKeyStore = cacheKeyStore
@@ -38,6 +38,7 @@ public final class PipoModel {
         self.localStateStore = localStateStore
         self.settings = settings
         self.notificationService = notificationService
+        self.calendarService = calendarService
         self.urlOpener = urlOpener
     }
 

@@ -127,12 +127,13 @@ import Testing
 }
 
 @Test func partialRefreshMergesCachedUnrequestedSections() async throws {
-    let cached = DashboardSnapshot(generatedAt: "old", siteName: "LPU", studentName: "Alex", sections: DashboardSections(messages: [DashboardItem(id: "message", kind: "message", title: "Teacher", courseName: "Messages")]), courses: [])
-    let refreshed = DashboardSnapshot(generatedAt: "new", siteName: "LPU", studentName: "Alex", sections: DashboardSections(dueSoon: [DashboardItem(id: "due", kind: "assignment", title: "Due", courseName: "Course")]), courses: [])
+    let cached = DashboardSnapshot(generatedAt: "old", siteName: "LPU", studentName: "Alex", sections: DashboardSections(messages: [DashboardItem(id: "message", kind: "message", title: "Teacher", courseName: "Messages")]), courses: [Course(id: 1, name: "Course", publishedTotal: "1.25")])
+    let refreshed = DashboardSnapshot(generatedAt: "new", siteName: "LPU", studentName: "Alex", sections: DashboardSections(dueSoon: [DashboardItem(id: "due", kind: "assignment", title: "Due", courseName: "Course")]), courses: [Course(id: 1, name: "Course", upcomingCount: 1)])
     let coordinator = DashboardRefreshCoordinator(transport: SnapshotTransport(snapshot: refreshed), cache: InMemoryDashboardCache(snapshot: cached))
     let result = try await coordinator.refresh(token: "token", force: true, sections: ["due_soon"])
     #expect(result.sections.dueSoon.first?.id == "due")
     #expect(result.sections.messages.first?.id == "message")
+    #expect(result.courses.first?.publishedTotal == "1.25")
 }
 
 @Test func rejectsExternalDestination() throws {
