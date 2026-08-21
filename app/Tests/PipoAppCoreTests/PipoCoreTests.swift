@@ -201,6 +201,22 @@ import Testing
     #expect(model.phase == .signedOut)
 }
 
+@MainActor
+@Test func repeatedRefreshesReadKeychainOncePerLaunch() async {
+    let tokenStore = TestTokenStore(token: "stored-token")
+    let cache = InMemoryDashboardCache(snapshot: sampleSnapshot())
+    let model = PipoModel(
+        transport: FailingTransport(),
+        tokenStore: tokenStore,
+        refreshCoordinator: DashboardRefreshCoordinator(transport: FailingTransport(), cache: cache),
+        notificationService: NoopNotificationService(),
+        urlOpener: { _ in }
+    )
+    await model.refresh()
+    await model.refresh()
+    #expect(tokenStore.readCount == 1)
+}
+
 private func sampleSnapshot() -> DashboardSnapshot {
     DashboardSnapshot(generatedAt: "now", siteName: "LPU", studentName: "Alex", sections: DashboardSections(), courses: [Course(id: 12, name: "History")])
 }
@@ -225,8 +241,9 @@ private struct SnapshotTransport: PipoSidecarTransport {
 
 private final class TestTokenStore: PipoTokenStore, @unchecked Sendable {
     var value: String?
+    var readCount = 0
     init(token: String?) { value = token }
-    func token() throws -> String? { value }
+    func token() throws -> String? { readCount += 1; return value }
     func save(token: String) throws { value = token }
     func deleteToken() throws { value = nil }
 }

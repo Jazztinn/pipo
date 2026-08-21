@@ -1391,15 +1391,15 @@ fn resource_items(value: &Value, course: &Value) -> Vec<Value> {
             )
         })
         .filter_map(|module| {
-            let destination_value = module
-                .get("contents")
-                .and_then(Value::as_array)
-                .and_then(|contents| contents.first())
-                .map(destination)
-                .filter(|value| !value.is_empty())
-                .or_else(|| {
-                    let url = destination(module);
-                    (!url.is_empty()).then_some(url)
+            let module_url = destination(module);
+            let destination_value =
+                (!module_url.is_empty()).then_some(module_url).or_else(|| {
+                    module
+                        .get("contents")
+                        .and_then(Value::as_array)
+                        .and_then(|contents| contents.first())
+                        .map(destination)
+                        .filter(|value| !value.is_empty() && !value.starts_with("/webservice/"))
                 })?;
             let mut result = item(
                 module.get("id").cloned().unwrap_or(Value::Null),
@@ -1614,5 +1614,16 @@ mod tests {
         let items = resource_items(&contents, &course);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["title"], "Safe");
+    }
+    #[test]
+    fn resources_prefer_browser_module_urls_and_drop_token_only_links() {
+        let course = json!({ "id": 12, "name": "History" });
+        let contents = json!([{ "modules": [
+            { "id": 1, "modname": "resource", "name": "Module", "url": "https://lms.lpucavite.edu.ph/mod/resource/view.php?id=1", "contents": [{ "fileurl": "https://lms.lpucavite.edu.ph/webservice/pluginfile.php/1/doc.pdf" }] },
+            { "id": 2, "modname": "resource", "name": "Token only", "contents": [{ "fileurl": "https://lms.lpucavite.edu.ph/webservice/pluginfile.php/2/doc.pdf" }] }
+        ] }]);
+        let items = resource_items(&contents, &course);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["destination"], "/mod/resource/view.php?id=1");
     }
 }

@@ -29,6 +29,8 @@ public final class PipoModel {
     @ObservationIgnored private var hasRequestedNotificationAccess = false
     @ObservationIgnored private var consecutiveRefreshFailures = 0
     @ObservationIgnored private var rawSnapshot: DashboardSnapshot?
+    @ObservationIgnored private var sessionToken: String?
+    @ObservationIgnored private var hasLoadedStoredToken = false
 
     public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, refreshCoordinator: DashboardRefreshCoordinator, localStateStore: EncryptedLocalStateStore? = nil, settings: PipoSettings = PipoSettings(), notificationService: any PipoNotificationService = PipoSystemNotifications(), calendarService: any PipoCalendarService = PipoEventKitCalendar(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
         self.transport = transport
@@ -117,6 +119,8 @@ public final class PipoModel {
             let response = try await transport.send(SidecarRequest(method: "authenticate_with_password", params: ["username": .string(username), "password": .string(password)]))
             let token = try token(from: response)
             try tokenStore.save(token: token)
+            sessionToken = token
+            hasLoadedStoredToken = true
             await refresh(using: token, force: true)
         } catch {
             fail(error)
@@ -129,6 +133,8 @@ public final class PipoModel {
         do {
             _ = try await transport.send(SidecarRequest(method: "authenticate_with_token", params: ["token": .string(token)]))
             try tokenStore.save(token: token)
+            sessionToken = token
+            hasLoadedStoredToken = true
             await refresh(using: token, force: true)
         } catch {
             fail(error)
@@ -180,6 +186,8 @@ public final class PipoModel {
         phase = .signedOut
         selectedTab = .dashboard
         localState = PipoLocalState()
+        sessionToken = nil
+        hasLoadedStoredToken = true
     }
 
     public func markSeen(_ id: String) async {
@@ -297,8 +305,14 @@ public final class PipoModel {
     }
 
     private func storedToken() -> String? {
-        do { return try tokenStore.token() }
-        catch { return nil }
+        if hasLoadedStoredToken { return sessionToken }
+        hasLoadedStoredToken = true
+        do {
+            sessionToken = try tokenStore.token()
+            return sessionToken
+        } catch {
+            return nil
+        }
     }
 
     private func persistLocalState() async {
