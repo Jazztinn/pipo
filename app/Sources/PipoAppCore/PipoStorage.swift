@@ -83,6 +83,6 @@ public actor EncryptedDashboardCache: DashboardCache {
     }
 }
 
-private extension Optional where Wrapped == Data {
+extension Optional where Wrapped == Data {
     func unwrap(or error: Error) throws -> Data { guard let self else { throw error }; return self }
 }

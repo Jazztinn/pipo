@@ -50,3 +50,39 @@ func dashboardSnapshotKeepsPublishedGradeDataAtCourseLevel() {
     #expect(snapshot.courses.first?.publishedTotal == "1.50")
     #expect(snapshot.gradeFeedback.isEmpty)
 }
+
+@Test
+func deadlineGroupsSeparateUrgentWork() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let now = Date(timeIntervalSince1970: 1_735_689_600)
+    let today = calendar.date(byAdding: .hour, value: 2, to: now)!
+    let later = calendar.date(byAdding: .day, value: 3, to: now)!
+    let snapshot = PipoDashboardSnapshot(
+        dueSoon: [
+            PipoTaskItem(id: "today", title: "Today", courseName: "Course", dueDate: today, status: .notSubmitted),
+            PipoTaskItem(id: "later", title: "Later", courseName: "Course", dueDate: later, status: .submitted)
+        ]
+    )
+
+    #expect(snapshot.deadlineGroups(now: now, calendar: calendar).map(\.0) == ["Today", "This week"])
+    #expect(snapshot.urgentCount >= 1)
+}
+
+@Test
+func v03SnapshotKeepsOptionalSectionsEmptyByDefault() {
+    let snapshot = PipoDashboardSnapshot()
+
+    #expect(snapshot.nextUp.isEmpty)
+    #expect(snapshot.schedule.isEmpty)
+    #expect(snapshot.announcements.isEmpty)
+    #expect(snapshot.resources.isEmpty)
+    #expect(snapshot.featureSupport == .all)
+}
+
+@Test
+func assignmentStatusHasContractWireValues() {
+    #expect(PipoAssignmentStatus(rawValue: "not_submitted") == .notSubmitted)
+    #expect(PipoAssignmentStatus(rawValue: "reopened") == .reopened)
+    #expect(PipoAssignmentStatus(rawValue: "future_status") == nil)
+}

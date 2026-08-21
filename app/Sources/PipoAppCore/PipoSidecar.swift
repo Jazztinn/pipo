@@ -37,7 +37,7 @@ public struct SidecarRequest: Codable, Sendable {
     public let method: String
     public let params: [String: PipoJSONValue]
 
-    public init(version: Int = 1, method: String, params: [String: PipoJSONValue]) {
+    public init(version: Int = 2, method: String, params: [String: PipoJSONValue]) {
         self.version = version
         self.id = UUID().uuidString
         self.method = method
@@ -50,6 +50,13 @@ public struct SidecarResponse: Codable, Sendable {
     public let id: String
     public let result: PipoJSONValue?
     public let error: SidecarFailure?
+
+    public init(version: Int, id: String, result: PipoJSONValue?, error: SidecarFailure?) {
+        self.version = version
+        self.id = id
+        self.result = result
+        self.error = error
+    }
 }
 
 public struct SidecarFailure: Codable, Sendable {

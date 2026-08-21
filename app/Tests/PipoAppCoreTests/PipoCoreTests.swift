@@ -50,6 +50,92 @@ import Testing
     }
 }
 
+@Test func versionOneSnapshotDecodesWithVersionTwoDefaults() throws {
+    let data = Data("""
+    {"version":1,"generated_at":"2026-08-21T03:00:00Z","site_name":"LPU","student_name":"Alex","sections":{"due_soon":[],"notifications":[],"new_assignments":[],"messages":[],"grade_feedback":[]},"supported":{"due_soon":true,"notifications":true,"assignments":true,"messages":true,"grades":true},"assignment_ids":[],"courses":[],"failures":[]}
+    """.utf8)
+    let snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: data)
+    #expect(snapshot.version == 1)
+    #expect(snapshot.schedule.isEmpty)
+    #expect(snapshot.announcements.isEmpty)
+    #expect(!snapshot.supported.resources)
+}
+
+@Test func rankingPrefersOverdueUnsubmittedAssignment() {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    let iso = ISO8601DateFormatter()
+    let overdue = DashboardItem(id: "overdue", kind: "assignment", title: "Due", courseName: "Course", timestamp: iso.string(from: now.addingTimeInterval(-60)), submissionStatus: "not_submitted")
+    let soon = DashboardItem(id: "soon", kind: "assignment", title: "Soon", courseName: "Course", timestamp: iso.string(from: now.addingTimeInterval(60)))
+    let snapshot = DashboardSnapshot(generatedAt: iso.string(from: now), siteName: "LPU", studentName: "Alex", sections: DashboardSections(dueSoon: [soon], newAssignments: [overdue]), courses: [])
+    #expect(PipoDashboardRanking.nextUp(snapshot: snapshot, state: PipoLocalState(), now: now).first?.id == "overdue")
+}
+
+@Test func deadlineGroupingAndSnoozeExcludeFutureItems() {
+    let now = Date()
+    let item = DashboardItem(id: "later", kind: "assignment", title: "Later", courseName: "Course", timestamp: ISO8601DateFormatter().string(from: now.addingTimeInterval(2 * 24 * 60 * 60)))
+    var state = PipoLocalState()
+    state.snoozedUntil[item.id] = now.addingTimeInterval(60 * 60)
+    let snapshot = DashboardSnapshot(generatedAt: "now", siteName: "LPU", studentName: "Alex", sections: DashboardSections(dueSoon: [item]), courses: [])
+    #expect(PipoDashboardRanking.nextUp(snapshot: snapshot, state: state, now: now).isEmpty)
+    #expect(PipoDashboardRanking.groupedDeadlines([item], now: now)[.thisWeek]?.first?.id == item.id)
+}
+
+@Test func localStatePinsAndHidesCoursesWithoutDiscardingSnapshotData() {
+    var state = PipoLocalState()
+    state.pinnedCourseIDs.insert(2)
+    state.hiddenCourseIDs.insert(3)
+    let snapshot = DashboardSnapshot(
+        generatedAt: "now",
+        siteName: "LPU",
+        studentName: "Alex",
+        sections: DashboardSections(),
+        courses: [Course(id: 1, name: "Zulu"), Course(id: 2, name: "Alpha"), Course(id: 3, name: "Hidden")]
+    )
+    let presented = snapshot.applyingLocalState(state)
+    #expect(presented.courses.map(\.id) == [2, 1])
+    #expect(snapshot.courses.map(\.id) == [1, 2, 3])
+}
+
+@Test func seenAnnouncementsDoNotWinNextUpRanking() {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    let formatter = ISO8601DateFormatter()
+    let announcement = DashboardItem(id: "announcement", kind: "announcement", title: "Update", courseName: "Course", timestamp: formatter.string(from: now), section: "announcements")
+    var state = PipoLocalState()
+    state.seenIDs.insert(announcement.id)
+    let snapshot = DashboardSnapshot(generatedAt: formatter.string(from: now), siteName: "LPU", studentName: "Alex", sections: DashboardSections(), courses: [], announcements: [announcement])
+    #expect(PipoDashboardRanking.nextUp(snapshot: snapshot, state: state, now: now).isEmpty)
+}
+
+@Test func quietHourRemindersMoveToQuietEnd() {
+    var components = DateComponents()
+    components.calendar = Calendar(identifier: .gregorian)
+    components.year = 2026
+    components.month = 8
+    components.day = 21
+    components.hour = 23
+    let source = components.date!
+    let shifted = PipoReminderPlanner.shiftOutOfQuietHours(source, settings: PipoSettings())
+    #expect(Calendar.current.component(.hour, from: shifted) == 7)
+}
+
+@Test func diagnosticsExcludeStudentAndPrivatePayloads() throws {
+    let item = DashboardItem(id: "grade", kind: "grade", title: "Quiz", courseName: "Course", detail: "1.25")
+    let snapshot = DashboardSnapshot(generatedAt: "now", siteName: "LPU", studentName: "Alex", sections: DashboardSections(gradeFeedback: [item]), courses: [])
+    let rendered = String(decoding: try PipoDiagnostics(snapshot: snapshot, appVersion: "test", macOSVersion: "test").encoded(), as: UTF8.self)
+    #expect(!rendered.contains("Alex"))
+    #expect(!rendered.contains("1.25"))
+}
+
+@Test func partialRefreshMergesCachedUnrequestedSections() async throws {
+    let cached = DashboardSnapshot(generatedAt: "old", siteName: "LPU", studentName: "Alex", sections: DashboardSections(messages: [DashboardItem(id: "message", kind: "message", title: "Teacher", courseName: "Messages")]), courses: [Course(id: 1, name: "Course", publishedTotal: "1.25")])
+    let refreshed = DashboardSnapshot(generatedAt: "new", siteName: "LPU", studentName: "Alex", sections: DashboardSections(dueSoon: [DashboardItem(id: "due", kind: "assignment", title: "Due", courseName: "Course")]), courses: [Course(id: 1, name: "Course", upcomingCount: 1)])
+    let coordinator = DashboardRefreshCoordinator(transport: SnapshotTransport(snapshot: refreshed), cache: InMemoryDashboardCache(snapshot: cached))
+    let result = try await coordinator.refresh(token: "token", force: true, sections: ["due_soon"])
+    #expect(result.sections.dueSoon.first?.id == "due")
+    #expect(result.sections.messages.first?.id == "message")
+    #expect(result.courses.first?.publishedTotal == "1.25")
+}
+
 @Test func rejectsExternalDestination() throws {
     #expect(throws: PipoCoreError.originRejected) { try DestinationPolicy.resolve("https://example.edu/login") }
     let destination = try DestinationPolicy.resolve("/course/view.php?id=12")
@@ -127,6 +213,14 @@ private struct NoopNotificationService: PipoNotificationService {
     func requestAuthorization() async {}
     func deliver(_ payloads: [PipoNotificationPayload]) async {}
     func clear() {}
+}
+
+private struct SnapshotTransport: PipoSidecarTransport {
+    let snapshot: DashboardSnapshot
+    func send(_ request: SidecarRequest) async throws -> SidecarResponse {
+        let value = try JSONDecoder().decode(PipoJSONValue.self, from: JSONEncoder().encode(snapshot))
+        return SidecarResponse(version: request.version, id: request.id, result: value, error: nil)
+    }
 }
 
 private final class TestTokenStore: PipoTokenStore, @unchecked Sendable {

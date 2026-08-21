@@ -24,11 +24,16 @@ menu-bar window remains the fast dashboard for Today and Courses.
 
 ## Today
 
-Today shows these sections in order: due soon, unread notifications, new
-assignments, recent messages, and grade feedback. New assignments remove IDs
+Today shows Next up, Schedule, smart deadline groups, announcements, recent
+messages, grade feedback, and recent resources. New assignments remove IDs
 already present in due soon. Notification, message, and grade-feedback rows
 show course and title metadata. They do not show message text or grade text.
 Rows open an LMS destination when the model supplies one.
+
+Today supports cached search and filters by course and item type. Students can
+copy item details, add dated items to Calendar through the AppCore action hook,
+snooze local reminders, and mark items seen. Failed sections expose their own
+retry action. Empty sections stay collapsed.
 
 The empty state explains that the day has no returned items. Loading shows a
 progress state. Offline state retains and labels the cached dashboard. A
@@ -38,14 +43,18 @@ sections and keep the returned sections visible.
 ## Courses
 
 Courses are limited to the published course list. Selecting a course opens a
-detail view with the course name, short name, and published grade when one is
-available. No edit or submission action is presented.
+detail view with the course name, short name, published grade, assignments,
+announcements, and resources when supported. Courses support search, pinning,
+and hiding. Hidden courses remain recoverable from the course filter menu. No
+edit or submission action is presented.
 
 ## Settings and updates
 
-Settings exposes the fixed LMS origin, refresh interval, notification choice,
-launch-at-login choice, browser link, and sign-out action. Terra's model owns
-the persisted values; these controls are the UI surface for that contract.
+Settings exposes grouped Connection, Sync, Reminders, Capabilities, Storage,
+Updates, Diagnostics, and About controls. It includes refresh-now, cache-clear,
+quiet hours, reminder switches, update channel, redacted diagnostics export,
+and hidden-course recovery. Terra's model owns sensitive persistence; UI-only
+preferences use UserDefaults until AppCore action hooks are wired.
 
 The optional update action is a hook for the app's updater. The banner is
 hidden when no updater action is supplied.
@@ -66,4 +75,5 @@ remains in force.
 The model owns cached data and the 15-minute refresh cadence. The UI keeps
 returned cached data visible during offline state. Password input is cleared
 before the sign-in operation is handed to the model; the model performs the
-one-time exchange and token persistence.
+one-time exchange and token persistence. v0.3 mapping consumes new contract
+fields with empty defaults for older snapshots.
