@@ -24,7 +24,7 @@ ditto -x -k "$ARCHIVE" "$EXTRACTED"
 test -d "$EXTRACTED/Pipo.app"
 "$ROOT/scripts/build-dmg.sh" "$EXTRACTED/Pipo.app" "$UPDATES/Pipo-$VERSION-arm64.dmg"
 
-"$SPARKLE_BIN/generate_appcast" \
+/usr/bin/script -q /dev/null "$SPARKLE_BIN/generate_appcast" \
   --account com.jazztinn.pipo \
   --download-url-prefix "https://github.com/Jazztinn/pipo/releases/download/$TAG/" \
   --link "https://github.com/Jazztinn/pipo" \

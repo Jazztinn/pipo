@@ -9,5 +9,3 @@ target/
 .env
 .env.*
 !.env.example
-appcast.xml
-
