@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="420" viewBox="0 0 660 420">
+  <rect width="660" height="420" fill="#171717"/>
+  <rect x="18" y="18" width="624" height="384" rx="22" fill="#750F20"/>
+  <circle cx="72" cy="72" r="5" fill="#F4BE32"/>
+  <text x="92" y="82" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="30" font-weight="700">Install Pipo</text>
+  <text x="330" y="125" fill="#E7E2E2" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="16" text-anchor="middle">Drag Pipo into Applications</text>
+  <path d="M270 236 H390" fill="none" stroke="#F4BE32" stroke-width="8" stroke-linecap="round"/>
+  <path d="M374 217 L394 236 L374 255" fill="none" stroke="#F4BE32" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="330" y="368" fill="#D8C7CA" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" text-anchor="middle">Requires macOS 14 or later</text>
+</svg>

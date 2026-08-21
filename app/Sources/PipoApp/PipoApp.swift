@@ -11,6 +11,18 @@ struct PipoApp: App {
     private let updater = PipoUpdater()
 
     var body: some Scene {
+        Window("Pipo", id: "pipo") {
+            PipoCompanionView(
+                model: model,
+                installUpdate: updater.isConfigured ? updater.checkForUpdates : nil
+            )
+            .frame(minWidth: 520, idealWidth: 560, minHeight: 560, idealHeight: 620)
+            .task {
+                await model.start()
+            }
+        }
+        .defaultSize(width: 560, height: 620)
+
         MenuBarExtra("Pipo", systemImage: "flag.fill") {
             PipoRootView(
                 model: model,
@@ -20,20 +32,8 @@ struct PipoApp: App {
                 )
             )
                 .frame(width: 420, height: 620)
-                .task {
-                    await model.start()
-                }
         }
         .menuBarExtraStyle(.window)
-
-        Settings {
-            PipoSettingsView(model: model) {
-                Task { @MainActor in
-                    await model.signOut()
-                }
-            }
-                .frame(width: 460, height: 420)
-        }
     }
 }
 
@@ -59,6 +59,6 @@ final class PipoUpdater {
 
 final class PipoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
     }
 }

@@ -12,12 +12,17 @@ SPARKLE_BIN=$3
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TAG="v$VERSION"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/pipo-release.XXXXXX")
+EXTRACTED="$WORK/extracted"
+UPDATES="$WORK/updates"
 trap 'rm -rf "$WORK"' EXIT
 
 test -f "$ARCHIVE"
 test -x "$SPARKLE_BIN/generate_appcast"
 
-cp "$ARCHIVE" "$WORK/Pipo-$VERSION-arm64.zip"
+mkdir "$EXTRACTED" "$UPDATES"
+ditto -x -k "$ARCHIVE" "$EXTRACTED"
+test -d "$EXTRACTED/Pipo.app"
+"$ROOT/scripts/build-dmg.sh" "$EXTRACTED/Pipo.app" "$UPDATES/Pipo-$VERSION-arm64.dmg"
 
 "$SPARKLE_BIN/generate_appcast" \
   --account com.jazztinn.pipo \
@@ -25,10 +30,11 @@ cp "$ARCHIVE" "$WORK/Pipo-$VERSION-arm64.zip"
   --link "https://github.com/Jazztinn/pipo" \
   --maximum-deltas 0 \
   -o "$ROOT/appcast.xml" \
-  "$WORK"
+  "$UPDATES"
 
 gh release create "$TAG" \
-  "$WORK/Pipo-$VERSION-arm64.zip" \
+  "$UPDATES/Pipo-$VERSION-arm64.dmg" \
+  "$ARCHIVE#Pipo $VERSION portable ZIP" \
   --repo Jazztinn/pipo \
   --title "Pipo $VERSION" \
   --generate-notes

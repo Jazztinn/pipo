@@ -5,6 +5,13 @@ The menu-bar window is 420 by 620 points. The UI uses system colors with
 maroon and gold accents. Toolbar controls may use Liquid Glass on macOS 26;
 macOS 14 and later use a material fallback.
 
+## Desktop companion
+
+Launching Pipo from Applications opens a compact desktop window. Signed-out
+students see onboarding and authentication. Signed-in students see account
+status, connection controls, preferences, update checks, and sign out. The
+menu-bar window remains the fast dashboard for Today and Courses.
+
 ## Entry and authentication
 
 - The first screen offers school-account sign-in and access-token sign-in.

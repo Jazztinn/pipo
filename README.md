@@ -12,6 +12,13 @@ Pipo connects only to `https://lms.lpucavite.edu.ph` and stores LMS access in
 the macOS Keychain. The project is in local beta development and is not
 affiliated with or endorsed by Lyceum of the Philippines University.
 
+## Install
+
+Download the latest Pipo DMG from GitHub Releases, open it, and drag Pipo into
+Applications. Launching Pipo opens onboarding or account settings; the menu-bar
+icon opens the student dashboard. Pipo checks for signed updates every day and
+asks before installing them.
+
 ## Principles
 
 - Less input, more interaction.

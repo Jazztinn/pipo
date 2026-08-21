@@ -349,6 +349,88 @@ public struct PipoUIConfiguration {
 }
 
 @MainActor
+public struct PipoCompanionView: View {
+    @Bindable private var model: PipoModel
+    private let installUpdate: (@MainActor () -> Void)?
+
+    public init(model: PipoModel, installUpdate: (@MainActor () -> Void)? = nil) {
+        self._model = Bindable(model)
+        self.installUpdate = installUpdate
+    }
+
+    public var body: some View {
+        Group {
+            switch model.phase {
+            case .signedOut:
+                onboarding()
+            case .authenticating, .loading:
+                VStack(spacing: 18) {
+                    Image(nsImage: NSApplication.shared.applicationIconImage)
+                        .resizable()
+                        .frame(width: 72, height: 72)
+                        .accessibilityHidden(true)
+                    Text("Connecting to LPU Cavite LMS")
+                        .font(.title3.weight(.semibold))
+                    PipoSkeletonLine(width: 280, height: 18)
+                    PipoSkeletonLine(width: 220, height: 14)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Connecting to LPU Cavite LMS")
+            case .failed(_):
+                onboarding(error: model.authenticationError)
+            default:
+                VStack(spacing: 0) {
+                    HStack(spacing: 14) {
+                        Image(nsImage: NSApplication.shared.applicationIconImage)
+                            .resizable()
+                            .frame(width: 54, height: 54)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Pipo")
+                                .font(.title2.bold())
+                            Text(model.snapshot?.studentName.isEmpty == false ? model.snapshot?.studentName ?? "LPU Cavite student" : "LPU Cavite student")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Label(model.phase == .offline ? "Offline" : "Connected", systemImage: model.phase == .offline ? "wifi.slash" : "checkmark.circle.fill")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(model.phase == .offline ? PipoPalette.warning : .green)
+                    }
+                    .padding(20)
+
+                    Divider()
+
+                    PipoSettingsView(
+                        model: model,
+                        onSignOut: {
+                            Task { @MainActor in await model.signOut() }
+                        },
+                        onInstallUpdate: installUpdate
+                    )
+                }
+            }
+        }
+        .background(PipoPalette.windowBackground)
+    }
+
+    @ViewBuilder
+    private func onboarding(error: String? = nil) -> some View {
+        PipoOnboardingView(
+            externalError: error,
+            onPasswordSignIn: { username, password in
+                Task { @MainActor in await model.signIn(username: username, password: password) }
+            },
+            onTokenSignIn: { token in
+                Task { @MainActor in await model.signIn(withToken: token) }
+            },
+            onOpenURL: { NSWorkspace.shared.open($0) }
+        )
+    }
+}
+
+@MainActor
 public struct PipoRootView: View {
     private let model: PipoModel
     private let configuration: PipoUIConfiguration
@@ -487,6 +569,7 @@ private struct PipoOnboardingView: View {
     @State private var password = ""
     @State private var token = ""
     @State private var validationMessage: String?
+    var externalError: String? = nil
     let onPasswordSignIn: (String, String) -> Void
     let onTokenSignIn: (String) -> Void
     let onOpenURL: (URL) -> Void
@@ -554,12 +637,12 @@ private struct PipoOnboardingView: View {
                     }
                 }
 
-                if let validationMessage {
-                    Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+                if let message = validationMessage ?? externalError {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
                         .foregroundStyle(PipoPalette.warning)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityLabel(validationMessage)
+                        .accessibilityLabel(message)
                 }
 
                 Divider()
