@@ -94,3 +94,20 @@ func secureStorageAdapterDefaultsToAvailable() {
 
     #expect(configuration.secureStorageStatus() == .available)
 }
+
+@Test
+@MainActor
+func secureStorageRecoveryRemainsExplicit() async {
+    var retryCount = 0
+    let configuration = PipoUIConfiguration(
+        secureStorageStatus: { .denied },
+        retrySecureStorageAccess: { retryCount += 1 }
+    )
+
+    #expect(configuration.secureStorageStatus() == .denied)
+    #expect(retryCount == 0)
+
+    await configuration.retrySecureStorageAccess()
+
+    #expect(retryCount == 1)
+}

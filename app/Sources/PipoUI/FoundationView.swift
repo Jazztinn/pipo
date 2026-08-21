@@ -542,7 +542,20 @@ public struct PipoUIConfiguration {
             seenIDs: { model.localState.seenIDs },
             snoozedIDs: { Set(model.localState.snoozedUntil.filter { $0.value > .now }.keys) },
             pinnedCourseIDs: { Set(model.localState.pinnedCourseIDs.map(String.init)) },
-            hiddenCourseIDs: { Set(model.localState.hiddenCourseIDs.map(String.init)) }
+            hiddenCourseIDs: { Set(model.localState.hiddenCourseIDs.map(String.init)) },
+            secureStorageStatus: {
+                switch model.secureStorageStatus {
+                case .ready:
+                    .available
+                case .accessDenied:
+                    .denied
+                case .unavailable:
+                    .unavailable
+                }
+            },
+            retrySecureStorageAccess: {
+                await model.retrySecureStorageAccess()
+            }
         )
     }
 
