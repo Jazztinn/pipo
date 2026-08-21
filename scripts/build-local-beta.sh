@@ -20,7 +20,6 @@ cp "$ROOT/.build/release/PipoApp" "$APP/Contents/MacOS/PipoApp"
 cp "$ROOT/rust/target/release/pipo-core" "$APP/Contents/MacOS/pipo-core"
 cp "$ROOT/app/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/app/Resources/PipoIcon.png" "$APP/Contents/Resources/PipoIcon.png"
-cp "$ROOT/app/Resources/PipoMark.svg" "$APP/Contents/Resources/PipoMark.svg"
 
 SPARKLE_FRAMEWORK=$(find "$ROOT/.build" -type d -name Sparkle.framework -print -quit)
 if [ -z "$SPARKLE_FRAMEWORK" ]; then

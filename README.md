@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="app/Resources/PipoIcon.png" width="160" alt="Pipo logo">
+</p>
+
 # Pipo
 
 Pipo is an unofficial macOS menu-bar companion for LPU Cavite students. It
