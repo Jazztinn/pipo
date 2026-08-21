@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Jazztinn/pipo/contracts/dashboard.schema.json",
+  "title": "Pipo Core Protocol",
+  "type": "object",
+  "required": ["version", "id", "method"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "method": {
+      "enum": [
+        "authenticate_with_password",
+        "authenticate_with_token",
+        "discover_capabilities",
+        "refresh_dashboard",
+        "load_course",
+        "resolve_destination"
+      ]
+    },
+    "params": { "type": "object" }
+  },
+  "additionalProperties": false
+}
+

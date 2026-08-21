@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "generated_at": "2026-08-21T03:00:00Z",
+  "site_name": "LPU Cavite LMS",
+  "student_name": "Alex Lycean",
+  "sections": {
+    "due_soon": [
+      {
+        "id": "assignment-42",
+        "kind": "assignment",
+        "title": "Reflection paper",
+        "course_id": 12,
+        "course_name": "Understanding the Self",
+        "timestamp": "2026-08-23T15:59:00Z",
+        "is_unread": false,
+        "destination": "/mod/assign/view.php?id=42"
+      }
+    ],
+    "notifications": [],
+    "new_assignments": [],
+    "messages": [],
+    "grade_feedback": []
+  },
+  "courses": [
+    {
+      "id": 12,
+      "name": "Understanding the Self",
+      "short_name": "UTS",
+      "published_total": "1.50"
+    }
+  ],
+  "failures": []
+}
+
