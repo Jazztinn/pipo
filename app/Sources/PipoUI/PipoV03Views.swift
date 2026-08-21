@@ -446,6 +446,7 @@ public struct PipoV03SettingsView: View {
     @AppStorage("pipo.updates.channel") private var updateChannel = "stable"
     @State private var isSignOutConfirmationPresented = false
     @State private var storageMessage: String?
+    @State private var isRetryingSecureStorage = false
 
     public init(model: PipoModel, onSignOut: @escaping () -> Void = {}, onInstallUpdate: (@MainActor () -> Void)? = nil, configuration: PipoUIConfiguration) {
         self._model = Bindable(model)
@@ -532,6 +533,13 @@ public struct PipoV03SettingsView: View {
             }
 
             Section("Storage") {
+                if secureStorageNeedsRecovery {
+                    PipoV03SecureStorageRecoveryRow(
+                        isRetrying: isRetryingSecureStorage,
+                        message: secureStorageGuidance,
+                        retry: retrySecureStorage
+                    )
+                }
                 Button { Task { do { try await configuration.clearCache(); storageMessage = "Saved dashboard cleared." } catch { storageMessage = "Could not clear saved dashboard." } } } label: { Label("Clear saved dashboard", systemImage: "trash") }
                 if let storageMessage { Text(storageMessage).font(.caption).foregroundStyle(.secondary) }
             }
@@ -578,6 +586,59 @@ public struct PipoV03SettingsView: View {
         } message: {
             Text("Pipo will remove your LMS token and saved dashboard from this Mac.")
         }
+    }
+
+    private var secureStorageNeedsRecovery: Bool {
+        switch configuration.secureStorageStatus() {
+        case .denied, .unavailable:
+            true
+        default:
+            false
+        }
+    }
+
+    private var secureStorageGuidance: String {
+        switch configuration.secureStorageStatus() {
+        case .denied:
+            "Pipo cannot access saved login right now. Allow Keychain access, then try again."
+        case .unavailable:
+            "Pipo cannot reach macOS secure storage right now. Try again when Keychain is available."
+        default:
+            ""
+        }
+    }
+
+    private func retrySecureStorage() {
+        guard !isRetryingSecureStorage else { return }
+        isRetryingSecureStorage = true
+        Task { @MainActor in
+            await configuration.retrySecureStorageAccess()
+            isRetryingSecureStorage = false
+        }
+    }
+}
+
+@MainActor
+private struct PipoV03SecureStorageRecoveryRow: View {
+    let isRetrying: Bool
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Secure storage needs attention", systemImage: "key.slash")
+                .font(.headline)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: retry) {
+                Label("Try again", systemImage: "arrow.clockwise")
+            }
+            .disabled(isRetrying)
+            .accessibilityHint("Checks secure storage again. No access is requested until you choose this button.")
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 

@@ -86,3 +86,11 @@ func assignmentStatusHasContractWireValues() {
     #expect(PipoAssignmentStatus(rawValue: "reopened") == .reopened)
     #expect(PipoAssignmentStatus(rawValue: "future_status") == nil)
 }
+
+@Test
+@MainActor
+func secureStorageAdapterDefaultsToAvailable() {
+    let configuration = PipoUIConfiguration()
+
+    #expect(configuration.secureStorageStatus() == .available)
+}

@@ -54,6 +54,12 @@ public enum PipoUIPhase: Equatable {
     case failed(String)
 }
 
+public enum PipoUISecureStorageStatus: Equatable, Sendable {
+    case available
+    case denied
+    case unavailable
+}
+
 public enum PipoAssignmentStatus: String, CaseIterable, Sendable {
     case notSubmitted = "not_submitted"
     case submitted
@@ -413,6 +419,8 @@ public struct PipoUIConfiguration {
     public var snoozedIDs: @MainActor () -> Set<String>
     public var pinnedCourseIDs: @MainActor () -> Set<String>
     public var hiddenCourseIDs: @MainActor () -> Set<String>
+    public var secureStorageStatus: @MainActor () -> PipoUISecureStorageStatus
+    public var retrySecureStorageAccess: @MainActor () async -> Void
 
     public init(
         modelBacked: Bool = false,
@@ -437,7 +445,9 @@ public struct PipoUIConfiguration {
         seenIDs: @escaping @MainActor () -> Set<String> = { [] },
         snoozedIDs: @escaping @MainActor () -> Set<String> = { [] },
         pinnedCourseIDs: @escaping @MainActor () -> Set<String> = { [] },
-        hiddenCourseIDs: @escaping @MainActor () -> Set<String> = { [] }
+        hiddenCourseIDs: @escaping @MainActor () -> Set<String> = { [] },
+        secureStorageStatus: @escaping @MainActor () -> PipoUISecureStorageStatus = { .available },
+        retrySecureStorageAccess: @escaping @MainActor () async -> Void = {}
     ) {
         self.modelBacked = modelBacked
         self.initialPhase = initialPhase
@@ -462,6 +472,8 @@ public struct PipoUIConfiguration {
         self.snoozedIDs = snoozedIDs
         self.pinnedCourseIDs = pinnedCourseIDs
         self.hiddenCourseIDs = hiddenCourseIDs
+        self.secureStorageStatus = secureStorageStatus
+        self.retrySecureStorageAccess = retrySecureStorageAccess
     }
 
     public init(model: PipoModel, installUpdate: (@MainActor () -> Void)? = nil) {
