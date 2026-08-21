@@ -554,7 +554,7 @@ public struct PipoUIConfiguration {
                 }
             },
             retrySecureStorageAccess: {
-                await model.retrySecureStorageAccess()
+                _ = await model.retrySecureStorage()
             }
         )
     }
