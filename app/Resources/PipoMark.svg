@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Pipo</title>
+  <desc id="desc">A pirate flag rising from an open book</desc>
+  <path fill="#7A1732" d="M192 144h56v590h-56z"/>
+  <circle cx="220" cy="114" r="42" fill="#D5A62E"/>
+  <path fill="#252525" stroke="#D5A62E" stroke-width="28" stroke-linejoin="round" d="M244 180c180-92 332 48 548-10l-68 154 92 120c-236 72-374-76-572 28z"/>
+  <path fill="#FFFFFF" stroke="#252525" stroke-width="28" stroke-linejoin="round" d="M222 708c122-45 223-24 290 52 67-76 168-97 290-52l-34 170c-100-26-180-11-256 59-76-70-156-85-256-59z"/>
+  <path fill="#D5A62E" d="M256 790c101-25 184-6 256 58 72-64 155-83 256-58l-10 48c-95-20-172 2-246 70-74-68-151-90-246-70z"/>
+  <path fill="#7A1732" d="M489 752h46v184h-46z"/>
+</svg>
