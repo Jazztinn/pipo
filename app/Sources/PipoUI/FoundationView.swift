@@ -53,25 +53,147 @@ public enum PipoUIPhase: Equatable {
     case failed(String)
 }
 
+public enum PipoAssignmentStatus: String, CaseIterable, Sendable {
+    case notSubmitted = "not_submitted"
+    case submitted
+    case graded
+    case reopened
+    case unknown
+
+    public var title: String {
+        switch self {
+        case .notSubmitted: "Not submitted"
+        case .submitted: "Submitted"
+        case .graded: "Graded"
+        case .reopened: "Reopened"
+        case .unknown: "Status unavailable"
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .notSubmitted: "circle"
+        case .submitted: "checkmark.circle"
+        case .graded: "checkmark.seal"
+        case .reopened: "arrow.uturn.backward.circle"
+        case .unknown: "questionmark.circle"
+        }
+    }
+}
+
+public struct PipoScheduleItem: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let title: String
+    public let courseName: String
+    public let startsAt: Date
+    public let endsAt: Date?
+    public let destination: URL?
+
+    public init(id: String, title: String, courseName: String, startsAt: Date, endsAt: Date? = nil, destination: URL? = nil) {
+        self.id = id
+        self.title = title
+        self.courseName = courseName
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+        self.destination = destination
+    }
+}
+
+public struct PipoAnnouncementItem: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let title: String
+    public let courseName: String
+    public let date: Date?
+    public let excerpt: String?
+    public let destination: URL?
+
+    public init(id: String, title: String, courseName: String, date: Date? = nil, excerpt: String? = nil, destination: URL? = nil) {
+        self.id = id
+        self.title = title
+        self.courseName = courseName
+        self.date = date
+        self.excerpt = excerpt
+        self.destination = destination
+    }
+}
+
+public struct PipoResourceItem: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let title: String
+    public let courseName: String
+    public let kind: String?
+    public let date: Date?
+    public let destination: URL?
+
+    public init(id: String, title: String, courseName: String, kind: String? = nil, date: Date? = nil, destination: URL? = nil) {
+        self.id = id
+        self.title = title
+        self.courseName = courseName
+        self.kind = kind
+        self.date = date
+        self.destination = destination
+    }
+}
+
+public struct PipoCalendarEntry: Equatable, Sendable {
+    public let id: String
+    public let title: String
+    public let courseName: String
+    public let startsAt: Date
+    public let endsAt: Date?
+    public let destination: URL?
+
+    public init(id: String, title: String, courseName: String, startsAt: Date, endsAt: Date? = nil, destination: URL? = nil) {
+        self.id = id
+        self.title = title
+        self.courseName = courseName
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+        self.destination = destination
+    }
+}
+
+public struct PipoFeatureSupport: Equatable, Sendable {
+    public let schedule: Bool
+    public let announcements: Bool
+    public let resources: Bool
+    public let submissionStatus: Bool
+
+    public static let all = PipoFeatureSupport()
+
+    public init(schedule: Bool = true, announcements: Bool = true, resources: Bool = true, submissionStatus: Bool = true) {
+        self.schedule = schedule
+        self.announcements = announcements
+        self.resources = resources
+        self.submissionStatus = submissionStatus
+    }
+}
+
 public struct PipoTaskItem: Equatable, Identifiable, Sendable {
     public let id: String
     public let title: String
     public let courseName: String
     public let dueDate: Date?
     public let destination: URL?
+    public let excerpt: String?
+    public let status: PipoAssignmentStatus
 
     public init(
         id: String,
         title: String,
         courseName: String,
         dueDate: Date? = nil,
-        destination: URL? = nil
+        destination: URL? = nil,
+        excerpt: String? = nil,
+        status: PipoAssignmentStatus = .unknown
     ) {
         self.id = id
         self.title = title
         self.courseName = courseName
         self.dueDate = dueDate
         self.destination = destination
+        self.excerpt = excerpt
+        self.status = status
     }
 }
 
@@ -146,12 +268,14 @@ public struct PipoCourseItem: Equatable, Identifiable, Sendable {
     public let name: String
     public let shortName: String
     public let publishedTotal: String?
+    public let upcomingCount: Int
 
-    public init(id: String, name: String, shortName: String, publishedTotal: String? = nil) {
+    public init(id: String, name: String, shortName: String, publishedTotal: String? = nil, upcomingCount: Int = 0) {
         self.id = id
         self.name = name
         self.shortName = shortName
         self.publishedTotal = publishedTotal
+        self.upcomingCount = upcomingCount
     }
 }
 
@@ -179,6 +303,11 @@ public struct PipoDashboardSnapshot: Equatable, Sendable {
     public let courses: [PipoCourseItem]
     public let failures: [PipoFailureItem]
     public let supported: DashboardSectionSupport
+    public let featureSupport: PipoFeatureSupport
+    public let nextUp: [PipoTaskItem]
+    public let schedule: [PipoScheduleItem]
+    public let announcements: [PipoAnnouncementItem]
+    public let resources: [PipoResourceItem]
 
     public init(
         studentName: String? = nil,
@@ -191,7 +320,12 @@ public struct PipoDashboardSnapshot: Equatable, Sendable {
         gradeFeedback: [PipoGradeFeedbackItem] = [],
         courses: [PipoCourseItem] = [],
         failures: [PipoFailureItem] = [],
-        supported: DashboardSectionSupport = .all
+        supported: DashboardSectionSupport = .all,
+        featureSupport: PipoFeatureSupport = .all,
+        nextUp: [PipoTaskItem] = [],
+        schedule: [PipoScheduleItem] = [],
+        announcements: [PipoAnnouncementItem] = [],
+        resources: [PipoResourceItem] = []
     ) {
         self.studentName = studentName
         self.generatedAt = generatedAt
@@ -204,6 +338,11 @@ public struct PipoDashboardSnapshot: Equatable, Sendable {
         self.courses = courses
         self.failures = failures
         self.supported = supported
+        self.featureSupport = featureSupport
+        self.nextUp = nextUp
+        self.schedule = schedule
+        self.announcements = announcements
+        self.resources = resources
     }
 
     public var uniqueNewAssignments: [PipoTaskItem] {
@@ -212,7 +351,39 @@ public struct PipoDashboardSnapshot: Equatable, Sendable {
     }
 
     public var isEmpty: Bool {
-        dueSoon.isEmpty && notifications.isEmpty && uniqueNewAssignments.isEmpty && messages.isEmpty && gradeFeedback.isEmpty && courses.isEmpty
+        dueSoon.isEmpty && notifications.isEmpty && uniqueNewAssignments.isEmpty && messages.isEmpty && gradeFeedback.isEmpty && courses.isEmpty && nextUp.isEmpty && schedule.isEmpty && announcements.isEmpty && resources.isEmpty
+    }
+
+    public var urgentCount: Int {
+        let now = Date()
+        let tomorrow = now.addingTimeInterval(24 * 60 * 60)
+        let deadlines = dueSoon + uniqueNewAssignments
+        return deadlines.filter { item in
+            guard let dueDate = item.dueDate else { return false }
+            return dueDate <= tomorrow && item.status != .submitted && item.status != .graded
+        }.count
+    }
+
+    public func deadlineGroups(now: Date = Date(), calendar: Calendar = .current) -> [(String, [PipoTaskItem])] {
+        let start = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: start) ?? start
+        let dayAfter = calendar.date(byAdding: .day, value: 2, to: start) ?? tomorrow
+        let weekEnd = calendar.date(byAdding: .day, value: 7, to: start) ?? dayAfter
+        let groups: [(String, Date, Date?)] = [
+            ("Overdue", .distantPast, start),
+            ("Today", start, tomorrow),
+            ("Tomorrow", tomorrow, dayAfter),
+            ("This week", dayAfter, weekEnd),
+            ("Later", weekEnd, nil)
+        ]
+        let deadlines = dueSoon + uniqueNewAssignments
+        return groups.compactMap { title, lower, upper in
+            let items = deadlines.filter { item in
+                guard let date = item.dueDate else { return title == "Later" }
+                return date >= lower && (upper == nil || date < upper!)
+            }
+            return items.isEmpty ? nil : (title, items)
+        }
     }
 }
 
@@ -224,10 +395,16 @@ public struct PipoUIConfiguration {
     public var signInWithPassword: @MainActor (String, String) async throws -> Void
     public var signInWithToken: @MainActor (String) async throws -> Void
     public var refresh: @MainActor () async throws -> PipoDashboardSnapshot?
+    public var refreshSection: @MainActor (String) async throws -> PipoDashboardSnapshot?
     public var signOut: @MainActor () async throws -> Void
     public var loadCourse: @MainActor (Int) async throws -> CourseDetail?
     public var openURL: @MainActor (URL) -> Void
     public var installUpdate: (@MainActor () -> Void)?
+    public var clearCache: @MainActor () async throws -> Void
+    public var exportDiagnostics: (@MainActor () -> Void)?
+    public var addToCalendar: (@MainActor (PipoCalendarEntry) -> Void)?
+    public var snooze: (@MainActor (String, Date?) -> Void)?
+    public var markSeen: (@MainActor (String) -> Void)?
 
     public init(
         modelBacked: Bool = false,
@@ -236,10 +413,16 @@ public struct PipoUIConfiguration {
         signInWithPassword: @escaping @MainActor (String, String) async throws -> Void = { _, _ in },
         signInWithToken: @escaping @MainActor (String) async throws -> Void = { _ in },
         refresh: @escaping @MainActor () async throws -> PipoDashboardSnapshot? = { nil },
+        refreshSection: @escaping @MainActor (String) async throws -> PipoDashboardSnapshot? = { _ in nil },
         signOut: @escaping @MainActor () async throws -> Void = {},
         loadCourse: @escaping @MainActor (Int) async throws -> CourseDetail? = { _ in nil },
         openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
-        installUpdate: (@MainActor () -> Void)? = nil
+        installUpdate: (@MainActor () -> Void)? = nil,
+        clearCache: @escaping @MainActor () async throws -> Void = {},
+        exportDiagnostics: (@MainActor () -> Void)? = nil,
+        addToCalendar: (@MainActor (PipoCalendarEntry) -> Void)? = nil,
+        snooze: (@MainActor (String, Date?) -> Void)? = nil,
+        markSeen: (@MainActor (String) -> Void)? = nil
     ) {
         self.modelBacked = modelBacked
         self.initialPhase = initialPhase
@@ -247,10 +430,16 @@ public struct PipoUIConfiguration {
         self.signInWithPassword = signInWithPassword
         self.signInWithToken = signInWithToken
         self.refresh = refresh
+        self.refreshSection = refreshSection
         self.signOut = signOut
         self.loadCourse = loadCourse
         self.openURL = openURL
         self.installUpdate = installUpdate
+        self.clearCache = clearCache
+        self.exportDiagnostics = exportDiagnostics
+        self.addToCalendar = addToCalendar
+        self.snooze = snooze
+        self.markSeen = markSeen
     }
 
     public init(model: PipoModel, installUpdate: (@MainActor () -> Void)? = nil) {
@@ -265,6 +454,10 @@ public struct PipoUIConfiguration {
                 await model.signIn(withToken: token)
             },
             refresh: {
+                await model.refresh(force: true)
+                return model.snapshot.map(Self.snapshot(from:))
+            },
+            refreshSection: { _ in
                 await model.refresh(force: true)
                 return model.snapshot.map(Self.snapshot(from:))
             },
@@ -311,13 +504,23 @@ public struct PipoUIConfiguration {
             messages: snapshot.sections.messages.map(message(from:)),
             gradeFeedback: snapshot.sections.gradeFeedback.map(gradeFeedback(from:)),
             courses: snapshot.courses.map { course in
-                PipoCourseItem(id: String(course.id), name: course.name, shortName: course.shortName ?? "", publishedTotal: course.publishedTotal)
+                PipoCourseItem(id: String(course.id), name: course.name, shortName: course.shortName ?? "", publishedTotal: course.publishedTotal, upcomingCount: course.upcomingCount)
             },
             failures: snapshot.failures.enumerated().map { index, failure in
                 let parts = failure.split(separator: ":", maxSplits: 1).map(String.init)
                 return PipoFailureItem(id: "failure-\(index)", section: parts.first ?? "LMS", message: parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : failure)
             },
-            supported: snapshot.supported
+            supported: snapshot.supported,
+            featureSupport: PipoFeatureSupport(
+                schedule: snapshot.supported.schedule,
+                announcements: snapshot.supported.announcements,
+                resources: snapshot.supported.resources,
+                submissionStatus: snapshot.supported.submissionStatus
+            ),
+            nextUp: snapshot.nextUp.map(item(from:)),
+            schedule: snapshot.schedule.map(schedule(from:)),
+            announcements: snapshot.announcements.map(announcement(from:)),
+            resources: snapshot.resources.map(resource(from:))
         )
     }
 
@@ -332,7 +535,19 @@ public struct PipoUIConfiguration {
     }
 
     private static func item(from item: DashboardItem) -> PipoTaskItem {
-        PipoTaskItem(id: item.id, title: item.title, courseName: item.courseName, dueDate: date(from: item), destination: destination(from: item))
+        PipoTaskItem(id: item.id, title: item.title, courseName: item.courseName, dueDate: date(from: item), destination: destination(from: item), excerpt: item.excerpt, status: PipoAssignmentStatus(rawValue: item.submissionStatus ?? "") ?? .unknown)
+    }
+
+    private static func schedule(from item: DashboardItem) -> PipoScheduleItem {
+        PipoScheduleItem(id: item.id, title: item.title, courseName: item.courseName, startsAt: date(from: item) ?? .now, destination: destination(from: item))
+    }
+
+    private static func announcement(from item: DashboardItem) -> PipoAnnouncementItem {
+        PipoAnnouncementItem(id: item.id, title: item.title, courseName: item.courseName, date: date(from: item), excerpt: item.excerpt, destination: destination(from: item))
+    }
+
+    private static func resource(from item: DashboardItem) -> PipoResourceItem {
+        PipoResourceItem(id: item.id, title: item.title, courseName: item.courseName, kind: item.resourceKind, date: date(from: item), destination: destination(from: item))
     }
 
     private static func notification(from item: DashboardItem) -> PipoNotificationItem {
@@ -402,12 +617,12 @@ public struct PipoCompanionView: View {
 
                     Divider()
 
-                    PipoSettingsView(
+                    PipoV03SettingsView(
                         model: model,
                         onSignOut: {
                             Task { @MainActor in await model.signOut() }
                         },
-                        onInstallUpdate: installUpdate
+                        configuration: PipoUIConfiguration(model: model, installUpdate: installUpdate)
                     )
                 }
             }
@@ -469,6 +684,7 @@ public struct PipoRootView: View {
             } else {
                 PipoWorkspaceView(
                     model: model,
+                    configuration: configuration,
                     phase: visiblePhase,
                     snapshot: visibleSnapshot,
                     selectedTab: $selectedTab,
@@ -477,6 +693,7 @@ public struct PipoRootView: View {
                     onReconnect: refresh,
                     onLoadCourse: configuration.loadCourse,
                     onOpenURL: openURL,
+                    onSnapshot: { snapshot = $0 },
                     onSettings: { selectedTab = .settings },
                     onSignOut: { isSignOutConfirmationPresented = true },
                     onInstallUpdate: configuration.installUpdate
@@ -698,6 +915,7 @@ private struct PipoOnboardingView: View {
 @MainActor
 private struct PipoWorkspaceView: View {
     let model: PipoModel
+    let configuration: PipoUIConfiguration
     let phase: PipoUIPhase
     let snapshot: PipoDashboardSnapshot?
     @Binding var selectedTab: PipoTab
@@ -706,6 +924,7 @@ private struct PipoWorkspaceView: View {
     let onReconnect: () -> Void
     let onLoadCourse: @MainActor (Int) async throws -> CourseDetail?
     let onOpenURL: (URL) -> Void
+    let onSnapshot: (PipoDashboardSnapshot) -> Void
     let onSettings: () -> Void
     let onSignOut: () -> Void
     let onInstallUpdate: (@MainActor () -> Void)?
@@ -720,29 +939,34 @@ private struct PipoWorkspaceView: View {
                 Group {
                     switch selectedTab {
                     case .today:
-                        PipoTodayView(
+                        PipoV03TodayView(
                             phase: phase,
                             snapshot: snapshot,
                             onRefresh: onRefresh,
                             onReconnect: onReconnect,
                             onOpenURL: onOpenURL,
-                            onInstallUpdate: onInstallUpdate
+                            onInstallUpdate: onInstallUpdate,
+                            configuration: configuration,
+                            onSnapshot: onSnapshot
                         )
                     case .courses:
-                        PipoCoursesView(
+                        PipoV03CoursesView(
                             phase: phase,
                             courses: snapshot?.courses ?? [],
                             selectedCourseID: $selectedCourseID,
                             onRefresh: onRefresh,
                             onReconnect: onReconnect,
                             onLoadCourse: onLoadCourse,
-                            onOpenURL: onOpenURL
+                            onOpenURL: onOpenURL,
+                            configuration: configuration,
+                            onSnapshot: onSnapshot
                         )
                     case .settings:
-                        PipoSettingsView(
+                        PipoV03SettingsView(
                             model: model,
                             onSignOut: onSignOut,
-                            onInstallUpdate: onInstallUpdate
+                            onInstallUpdate: onInstallUpdate,
+                            configuration: configuration
                         )
                     }
                 }
