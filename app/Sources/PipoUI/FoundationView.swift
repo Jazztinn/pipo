@@ -706,8 +706,6 @@ private struct PipoTodayView: View {
     let snapshot: PipoDashboardSnapshot?
     let onRefresh: () -> Void
     let onReconnect: () -> Void
-    let onLoadCourse: @MainActor (Int) async throws -> CourseDetail?
-    let onOpenURL: (URL) -> Void
     let onOpenURL: (URL) -> Void
     let onInstallUpdate: (@MainActor () -> Void)?
 
@@ -783,6 +781,8 @@ private struct PipoCoursesView: View {
     @Binding var selectedCourseID: String?
     let onRefresh: () -> Void
     let onReconnect: () -> Void
+    let onLoadCourse: @MainActor (Int) async throws -> CourseDetail?
+    let onOpenURL: (URL) -> Void
 
     var body: some View {
         Group {
