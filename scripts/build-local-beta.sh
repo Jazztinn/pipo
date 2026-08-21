@@ -29,4 +29,8 @@ if [ -z "$SPARKLE_FRAMEWORK" ]; then
 fi
 cp -R "$SPARKLE_FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
 
+# Re-seal the assembled beta bundle after copying resources and nested code.
+codesign --force --deep --sign - "$APP"
+codesign --verify --deep --strict "$APP"
+
 echo "$APP"
