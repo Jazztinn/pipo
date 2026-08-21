@@ -71,10 +71,6 @@ final class PipoUpdater: NSObject, SPUUpdaterDelegate {
         }
     }
 
-    deinit {
-        if let channelObserver { NotificationCenter.default.removeObserver(channelObserver) }
-    }
-
     func checkForUpdates() {
         guard isConfigured else { return }
         controller.checkForUpdates(nil)
