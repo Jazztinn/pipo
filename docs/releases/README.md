@@ -1,7 +1,8 @@
 # Releases
 
-Pipo remains a local beta until a Developer ID identity and Sparkle signing key
-are configured.
+Pipo remains a local beta until a Developer ID identity is configured. Sparkle
+archives are signed from the maintainer Mac with the `com.jazztinn.pipo` EdDSA
+key stored in Keychain. The public appcast is served from the repository root.
 
 Public release checklist:
 
@@ -15,6 +16,6 @@ Public release checklist:
 - Publish GitHub release before updating the public appcast.
 - Install the previous version and verify the user-approved update path.
 
-The appcast URL is `https://jazztinn.github.io/pipo/appcast.xml`. Publishing it
-stays disabled until the first signed release candidate.
-
+The appcast URL is
+`https://raw.githubusercontent.com/Jazztinn/pipo/main/appcast.xml`. Never export
+or commit the private Sparkle key.

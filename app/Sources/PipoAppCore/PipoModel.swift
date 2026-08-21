@@ -37,11 +37,24 @@ public final class PipoModel {
     public static func live() -> PipoModel {
         let store = KeychainTokenStore()
         let cacheKeyStore = KeychainTokenStore(account: "pipo-cache-key")
+        let defaults = UserDefaults.standard
+        let savedRefreshMinutes = defaults.object(forKey: "pipo.refresh.minutes") as? Double ?? 15
+        let savedNotifications = defaults.object(forKey: "pipo.notifications.enabled") as? Bool ?? true
+        let settings = PipoSettings(
+            refreshInterval: min(max(savedRefreshMinutes, 5), 60) * 60,
+            notificationsEnabled: savedNotifications
+        )
         let cacheURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Pipo/dashboard.sqlite", isDirectory: false)
         try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let cacheKey = cacheKeyData(store: cacheKeyStore)
         let cache: any DashboardCache = (try? EncryptedDashboardCache(databaseURL: cacheURL, keyData: cacheKey)) ?? InMemoryDashboardCache()
-        return PipoModel(transport: PipoCoreProcessTransport(), tokenStore: store, cacheKeyStore: cacheKeyStore, refreshCoordinator: DashboardRefreshCoordinator(transport: PipoCoreProcessTransport(), cache: cache))
+        return PipoModel(
+            transport: PipoCoreProcessTransport(),
+            tokenStore: store,
+            cacheKeyStore: cacheKeyStore,
+            refreshCoordinator: DashboardRefreshCoordinator(transport: PipoCoreProcessTransport(), cache: cache),
+            settings: settings
+        )
     }
 
     public func start() async {

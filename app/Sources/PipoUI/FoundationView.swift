@@ -7,6 +7,7 @@ import SwiftUI
 public enum PipoTab: String, CaseIterable, Identifiable {
     case today
     case courses
+    case settings
 
     public var id: String { rawValue }
 
@@ -14,6 +15,7 @@ public enum PipoTab: String, CaseIterable, Identifiable {
         switch self {
         case .today: "Today"
         case .courses: "Courses"
+        case .settings: "Settings"
         }
     }
 
@@ -21,6 +23,7 @@ public enum PipoTab: String, CaseIterable, Identifiable {
         switch self {
         case .today: "sparkles"
         case .courses: "books.vertical"
+        case .settings: "gearshape"
         }
     }
 }
@@ -353,7 +356,6 @@ public struct PipoRootView: View {
     @State private var snapshot: PipoDashboardSnapshot?
     @State private var selectedTab: PipoTab = .today
     @State private var selectedCourseID: String?
-    @State private var isSettingsPresented = false
     @State private var isSignOutConfirmationPresented = false
 
     public init(model: PipoModel, configuration: PipoUIConfiguration = PipoUIConfiguration()) {
@@ -362,7 +364,13 @@ public struct PipoRootView: View {
         self.configuration = resolvedConfiguration
         _phase = State(initialValue: resolvedConfiguration.initialPhase)
         _snapshot = State(initialValue: resolvedConfiguration.initialSnapshot)
-        _selectedTab = State(initialValue: model.selectedTab == .courses ? .courses : .today)
+        _selectedTab = State(initialValue: {
+            switch model.selectedTab {
+            case .dashboard: .today
+            case .courses: .courses
+            case .settings: .settings
+            }
+        }())
     }
 
     public var body: some View {
@@ -378,6 +386,7 @@ public struct PipoRootView: View {
                 )
             } else {
                 PipoWorkspaceView(
+                    model: model,
                     phase: visiblePhase,
                     snapshot: visibleSnapshot,
                     selectedTab: $selectedTab,
@@ -386,7 +395,7 @@ public struct PipoRootView: View {
                     onReconnect: refresh,
                     onLoadCourse: configuration.loadCourse,
                     onOpenURL: openURL,
-                    onSettings: { isSettingsPresented = true },
+                    onSettings: { selectedTab = .settings },
                     onSignOut: { isSignOutConfirmationPresented = true },
                     onInstallUpdate: configuration.installUpdate
                 )
@@ -394,10 +403,6 @@ public struct PipoRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PipoPalette.windowBackground)
-        .sheet(isPresented: $isSettingsPresented) {
-            PipoSettingsView(model: model, onSignOut: signOut)
-                .frame(width: 460, height: 420)
-        }
         .confirmationDialog(
             "Sign out of Pipo?",
             isPresented: $isSignOutConfirmationPresented,
@@ -609,6 +614,7 @@ private struct PipoOnboardingView: View {
 
 @MainActor
 private struct PipoWorkspaceView: View {
+    let model: PipoModel
     let phase: PipoUIPhase
     let snapshot: PipoDashboardSnapshot?
     @Binding var selectedTab: PipoTab
@@ -648,6 +654,12 @@ private struct PipoWorkspaceView: View {
                             onReconnect: onReconnect,
                             onLoadCourse: onLoadCourse,
                             onOpenURL: onOpenURL
+                        )
+                    case .settings:
+                        PipoSettingsView(
+                            model: model,
+                            onSignOut: onSignOut,
+                            onInstallUpdate: onInstallUpdate
                         )
                     }
                 }
@@ -719,7 +731,7 @@ private struct PipoTodayView: View {
                 }
 
                 if phase == .loading {
-                    PipoLoadingState()
+                    PipoDashboardSkeleton()
                 } else if let snapshot, !snapshot.isEmpty {
                     if let studentName = snapshot.studentName, !studentName.isEmpty {
                         Text("Hello, \(studentName)")
@@ -787,7 +799,7 @@ private struct PipoCoursesView: View {
     var body: some View {
         Group {
             if phase == .loading || phase == .reconnecting {
-                PipoLoadingState()
+                PipoCoursesSkeleton()
             } else if phase == .offline && courses.isEmpty {
                 PipoEmptyState(title: "Courses unavailable", message: "Reconnect to load your courses.", systemImage: "wifi.slash", actionTitle: "Reconnect", action: onReconnect)
             } else if courses.isEmpty {
@@ -880,8 +892,7 @@ private struct PipoCourseDetailView: View {
                 }
 
                 if isLoading {
-                    ProgressView("Loading course")
-                        .controlSize(.small)
+                    PipoCourseDetailSkeleton()
                 } else if let loadError {
                     PipoStateBanner(title: "Course details unavailable", message: loadError, systemImage: "exclamationmark.triangle")
                 } else if let detail {
@@ -995,14 +1006,21 @@ private struct PipoCourseGrades: View {
 public struct PipoSettingsView: View {
     @Bindable private var model: PipoModel
     private let onSignOut: () -> Void
+    private let onInstallUpdate: (@MainActor () -> Void)?
     @AppStorage("pipo.notifications.enabled") private var notificationsEnabled = true
     @AppStorage("pipo.launch-at-login") private var launchAtLogin = false
+    @AppStorage("pipo.refresh.minutes") private var refreshMinutes = 15.0
     @State private var isSignOutConfirmationPresented = false
     @State private var launchAtLoginError: String?
 
-    public init(model: PipoModel, onSignOut: @escaping () -> Void = {}) {
+    public init(
+        model: PipoModel,
+        onSignOut: @escaping () -> Void = {},
+        onInstallUpdate: (@MainActor () -> Void)? = nil
+    ) {
         self._model = Bindable(model)
         self.onSignOut = onSignOut
+        self.onInstallUpdate = onInstallUpdate
     }
 
     public var body: some View {
@@ -1030,14 +1048,34 @@ public struct PipoSettingsView: View {
                         updateLaunchAtLogin(enabled)
                     }
                 HStack {
-                    Text("Every \(Int(model.settings.refreshInterval / 60)) minutes")
-                    Slider(value: $model.settings.refreshInterval, in: 300...3600, step: 300)
-                        .accessibilityValue("\(Int(model.settings.refreshInterval / 60)) minutes")
+                    Text("Every \(Int(refreshMinutes)) minutes")
+                    Slider(value: $refreshMinutes, in: 5...60, step: 5)
+                        .accessibilityValue("\(Int(refreshMinutes)) minutes")
+                        .onChange(of: refreshMinutes) { _, minutes in
+                            model.settings.refreshInterval = minutes * 60
+                        }
                 }
                 if let launchAtLoginError {
                     Text(launchAtLoginError)
                         .font(.caption)
                         .foregroundStyle(.red)
+                }
+            }
+
+            Section("Updates") {
+                if let onInstallUpdate {
+                    Button(action: onInstallUpdate) {
+                        Label("Check for updates", systemImage: "arrow.down.circle")
+                    }
+                } else {
+                    LabeledContent("Automatic updates") {
+                        Text("Available after the next release")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                LabeledContent("Version") {
+                    Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -1052,6 +1090,7 @@ public struct PipoSettingsView: View {
         .navigationTitle("Settings")
         .onAppear {
             model.settings.notificationsEnabled = notificationsEnabled
+            model.settings.refreshInterval = refreshMinutes * 60
         }
         .confirmationDialog(
             "Sign out of Pipo?",
@@ -1198,21 +1237,101 @@ private struct PipoEmptyState: View {
 }
 
 @MainActor
-private struct PipoLoadingState: View {
+private struct PipoDashboardSkeleton: View {
     var body: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Loading your LMS")
-                .font(.headline)
-            Text("Pipo is fetching courses and updates.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 22) {
+            PipoSkeletonLine(width: 190, height: 24)
+            ForEach(0..<3, id: \.self) { section in
+                VStack(alignment: .leading, spacing: 10) {
+                    PipoSkeletonLine(width: section == 1 ? 180 : 130, height: 18)
+                    PipoSkeletonRow()
+                    PipoSkeletonRow(short: section == 2)
+                }
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 48)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Loading your LMS")
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading your LMS dashboard")
+    }
+}
+
+@MainActor
+private struct PipoCoursesSkeleton: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(0..<6, id: \.self) { index in
+                HStack(spacing: 12) {
+                    PipoSkeletonLine(width: 22, height: 28)
+                    VStack(alignment: .leading, spacing: 7) {
+                        PipoSkeletonLine(width: index.isMultiple(of: 2) ? 250 : 210, height: 17)
+                        PipoSkeletonLine(width: 150, height: 12)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                Divider().padding(.leading, 54)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading courses")
+    }
+}
+
+@MainActor
+private struct PipoCourseDetailSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            PipoSkeletonLine(width: 120, height: 18)
+            PipoSkeletonRow()
+            PipoSkeletonRow(short: true)
+            PipoSkeletonLine(width: 140, height: 18)
+            PipoSkeletonRow()
+        }
+        .padding(.top, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading course details")
+    }
+}
+
+@MainActor
+private struct PipoSkeletonRow: View {
+    var short = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            PipoSkeletonLine(width: 18, height: 18)
+            VStack(alignment: .leading, spacing: 7) {
+                PipoSkeletonLine(width: short ? 190 : 250, height: 16)
+                PipoSkeletonLine(width: short ? 120 : 180, height: 11)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+@MainActor
+private struct PipoSkeletonLine: View {
+    let width: CGFloat
+    let height: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isDimmed = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: min(5, height / 2))
+            .fill(Color.secondary.opacity(isDimmed ? 0.12 : 0.25))
+            .frame(width: width, height: height)
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 0.85).repeatForever(autoreverses: true),
+                value: isDimmed
+            )
+            .onAppear {
+                guard !reduceMotion else { return }
+                isDimmed = true
+            }
     }
 }
 
