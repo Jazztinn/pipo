@@ -1,24 +1,24 @@
 # GitHub Release Setup
 
-Pipo's Release workflow keeps signing credentials in the GitHub `release`
-environment. Routine releases run without local Keychain prompts.
+Pipo currently publishes ad-hoc signed builds while Developer ID enrollment is
+deferred. Sparkle still verifies every in-app update with Pipo's EdDSA key.
 
-Configure these GitHub Actions secrets once:
+The GitHub `release` environment requires one Actions secret:
 
-- `CERTIFICATE_P12_BASE64`: Developer ID Application certificate and private key exported as a password-protected `.p12`, then Base64 encoded.
-- `CERTIFICATE_PASSWORD`: password used for the `.p12` export.
-- `CI_KEYCHAIN_PASSWORD`: random password used only for the temporary runner Keychain.
-- `DEVELOPER_ID_APPLICATION`: full `Developer ID Application: ... (TEAMID)` identity.
-- `APPLE_ID`: Apple Account used for notarization.
-- `APPLE_APP_PASSWORD`: app-specific password for notarization.
-- `APPLE_TEAM_ID`: Apple Developer team identifier.
 - `SPARKLE_PRIVATE_KEY`: raw EdDSA private key matching `SUPublicEDKey`.
 
-Protect the `release` environment with required reviewers. Never place any of
-these values in the repository, workflow inputs, logs, or release notes.
+Never place this value in the repository, workflow inputs, logs, or release
+notes. Protect the `release` environment with required reviewers when desired.
 
 To publish, open **Actions > Release > Run workflow**, choose a version and
-channel, then approve the protected environment. The workflow signs the app,
-notarizes and staples the DMG, signs the Sparkle appcast, creates the GitHub
-release, and pushes the updated feed. Existing users update in place through
-Pipo's **Check for Updates** control.
+channel, then approve the environment. The workflow builds the app and DMG,
+signs the Sparkle appcast, creates the GitHub release, and pushes the updated
+feed. Existing users update in place through Pipo's **Check for Updates**
+control.
+
+## Current limitation
+
+Without Developer ID signing and notarization, first-time users may need to
+approve Pipo in **System Settings > Privacy & Security**. A future Developer ID
+release can restore the certificate import, hardened runtime, notarization, and
+stapling stages without changing the Sparkle key.
