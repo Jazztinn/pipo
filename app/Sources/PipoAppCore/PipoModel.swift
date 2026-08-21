@@ -33,6 +33,7 @@ public final class PipoModel {
     @ObservationIgnored private var rawSnapshot: DashboardSnapshot?
     @ObservationIgnored private var sessionToken: String?
     @ObservationIgnored private var hasLoadedStoredToken = false
+    @ObservationIgnored private var isRefreshing = false
 
     public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, secureVault: KeychainSecureVault? = nil, refreshCoordinator: DashboardRefreshCoordinator, localStateStore: EncryptedLocalStateStore? = nil, settings: PipoSettings = PipoSettings(), notificationService: any PipoNotificationService = PipoSystemNotifications(), calendarService: any PipoCalendarService = PipoEventKitCalendar(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
         self.transport = transport
@@ -276,6 +277,9 @@ public final class PipoModel {
     }
 
     private func refresh(using token: String, force: Bool, sections: Set<String>? = nil) async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
         let previousSnapshot = snapshot
         phase = snapshot == nil ? .loading : .ready
         do {

@@ -6,8 +6,16 @@ import SwiftUI
 
 @MainActor
 private enum PipoV03Palette {
-    static let maroon = Color(red: 0.43, green: 0.08, blue: 0.12)
-    static let gold = Color(red: 0.70, green: 0.48, blue: 0.10)
+    static let maroon = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(calibratedRed: 0.90, green: 0.34, blue: 0.40, alpha: 1)
+            : NSColor(calibratedRed: 0.43, green: 0.08, blue: 0.12, alpha: 1)
+    })
+    static let gold = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(calibratedRed: 0.96, green: 0.70, blue: 0.25, alpha: 1)
+            : NSColor(calibratedRed: 0.64, green: 0.41, blue: 0.04, alpha: 1)
+    })
     static let warning = Color.orange
     static let row = Color(nsColor: .controlBackgroundColor)
 }
@@ -138,9 +146,16 @@ struct PipoV03TodayView: View {
 
         if itemFilter == .all || itemFilter == .messages {
             let messages = recent(snapshot.messages.filter { matches($0.title, $0.courseName) }, date: \.date)
-            if snapshot.supported.messages && !messages.isEmpty {
-                    PipoV03Section(title: "Recent messages", systemImage: "bubble.left.and.bubble.right", retry: retryAction(for: "messages")) {
-                    PipoV03ItemList(items: messages.map(messageDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze)
+            if snapshot.supported.messages {
+                let retry = retryAction(for: "messages")
+                PipoV03Section(title: "Messages", systemImage: "bubble.left.and.bubble.right", retry: retry) {
+                    if !messages.isEmpty {
+                        PipoV03ItemList(items: messages.map(messageDisplay), configuration: configuration, onOpenURL: onOpenURL, seenIDs: seenIDs, onSeen: markSeen, onSnooze: snooze)
+                    } else if retry != nil {
+                        PipoV03SectionEmpty(text: "Messages unavailable. Try again.")
+                    } else {
+                        PipoV03SectionEmpty(text: "No recent messages")
+                    }
                 }
             }
         }
@@ -772,7 +787,7 @@ private struct PipoV03ItemList: View {
     @State private var customSnoozeDate = Date().addingTimeInterval(3_600)
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 0) {
             ForEach(items) { item in
                 HStack(alignment: .top, spacing: 8) {
                     Button {
@@ -827,12 +842,16 @@ private struct PipoV03ItemList: View {
                         Image(systemName: "ellipsis.circle")
                     }
                     .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
                     .help("Actions")
                     .accessibilityLabel("Actions for \(item.title)")
                 }
-                .padding(10)
-                .background(PipoV03Palette.row, in: RoundedRectangle(cornerRadius: 7))
+                .padding(.vertical, 10)
+                .padding(.horizontal, 4)
                 .accessibilityElement(children: .contain)
+                if item.id != items.last?.id {
+                    Divider().padding(.leading, 32)
+                }
             }
         }
         .sheet(item: $customSnoozeItem) { item in

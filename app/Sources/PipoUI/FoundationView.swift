@@ -1018,8 +1018,11 @@ private struct PipoWorkspaceView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if let snapshot, !snapshot.failures.isEmpty {
-                    PipoPartialBanner(failures: snapshot.failures, onRefresh: onRefresh)
+                if let snapshot {
+                    let prominentFailures = snapshot.failures.filter { $0.section.localizedCaseInsensitiveCompare("Messages") != .orderedSame }
+                    if !prominentFailures.isEmpty {
+                        PipoPartialBanner(failures: prominentFailures, onRefresh: onRefresh)
+                    }
                 }
 
                 Group {

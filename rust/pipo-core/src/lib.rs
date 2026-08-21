@@ -426,8 +426,18 @@ impl MoodleClient {
         let messages = if requested.contains("messages")
             && capabilities.contains("core_message_get_conversations")
         {
-            match self.call(token, "core_message_get_conversations", json!({ "userid": user_id, "limitfrom": 0, "limitnum": 10, "type": 0, "favourites": false })).await {
-                Ok(value) => { section_timestamps.insert("messages".to_owned(), Value::String(rfc3339_now())); value },
+            match self
+                .call(
+                    token,
+                    "core_message_get_conversations",
+                    json!({ "userid": user_id, "limitfrom": 0, "limitnum": 10 }),
+                )
+                .await
+            {
+                Ok(value) => {
+                    section_timestamps.insert("messages".to_owned(), Value::String(rfc3339_now()));
+                    value
+                }
                 Err(error) => {
                     failures.push(section_failure("Messages", &error));
                     Value::Null

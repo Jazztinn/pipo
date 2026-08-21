@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use pipo_core::{MoodleClient, PROTOCOL_VERSION, REQUEST_CAP_BYTES, Request, Response, handle};
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -38,7 +39,24 @@ async fn main() {
             }
         } else {
             match serde_json::from_slice::<Request>(&line) {
-                Ok(request) => handle(request, &client).await,
+                Ok(request) => {
+                    let id = request.id.clone();
+                    match tokio::time::timeout(Duration::from_secs(120), handle(request, &client))
+                        .await
+                    {
+                        Ok(response) => response,
+                        Err(_) => Response {
+                            version: PROTOCOL_VERSION,
+                            id,
+                            result: None,
+                            error: Some(pipo_core::ErrorEnvelope {
+                                code: "timeout",
+                                message: "The LMS took too long to respond. Try again shortly."
+                                    .to_owned(),
+                            }),
+                        },
+                    }
+                }
                 Err(error) => Response {
                     version: PROTOCOL_VERSION,
                     id: String::new(),
