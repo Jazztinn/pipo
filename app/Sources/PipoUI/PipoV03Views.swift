@@ -528,7 +528,7 @@ public struct PipoV03SettingsView: View {
                 PipoV03CapabilityRow(title: "Submission status", supported: model.snapshot?.supported.submissionStatus ?? false)
                 PipoV03CapabilityRow(title: "Announcements", supported: model.snapshot?.supported.announcements ?? false)
                 PipoV03CapabilityRow(title: "Resources", supported: model.snapshot?.supported.resources ?? false)
-                if let failures = model.snapshot?.failures, !failures.isEmpty { Text(failures.map(\.section).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary) }
+                if let failures = model.snapshot?.failures, !failures.isEmpty { Text(failures.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary) }
             }
 
             Section("Storage") {
