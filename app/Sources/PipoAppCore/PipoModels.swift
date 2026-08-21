@@ -31,23 +31,25 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public let siteName: String
     public let studentName: String
     public let sections: DashboardSections
+    public let supported: DashboardSectionSupport
     public let assignmentIDs: [String]
     public let courses: [Course]
     public let failures: [String]
 
-    public init(version: Int = 1, generatedAt: String, siteName: String, studentName: String, sections: DashboardSections, assignmentIDs: [String] = [], courses: [Course], failures: [String] = []) {
+    public init(version: Int = 1, generatedAt: String, siteName: String, studentName: String, sections: DashboardSections, supported: DashboardSectionSupport = .all, assignmentIDs: [String] = [], courses: [Course], failures: [String] = []) {
         self.version = version
         self.generatedAt = generatedAt
         self.siteName = siteName
         self.studentName = studentName
         self.sections = sections.suppressingDueSoonDuplicates()
+        self.supported = supported
         self.assignmentIDs = assignmentIDs
         self.courses = courses
         self.failures = failures
     }
 
     public func privacyProjected() -> DashboardSnapshot {
-        DashboardSnapshot(version: version, generatedAt: generatedAt, siteName: siteName, studentName: studentName, sections: sections.privacyProjected(), assignmentIDs: assignmentIDs, courses: courses, failures: failures)
+        DashboardSnapshot(version: version, generatedAt: generatedAt, siteName: siteName, studentName: studentName, sections: sections.privacyProjected(), supported: supported, assignmentIDs: assignmentIDs, courses: courses, failures: failures)
     }
 
     public func presentingNewAssignments(since previousIDs: Set<String>?) -> DashboardSnapshot {
@@ -66,13 +68,14 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
                 messages: sections.messages,
                 gradeFeedback: sections.gradeFeedback
             ),
+            supported: supported,
             assignmentIDs: assignmentIDs,
             courses: courses,
             failures: failures
         )
     }
 
-    enum CodingKeys: String, CodingKey { case version, generatedAt = "generated_at", siteName = "site_name", studentName = "student_name", sections, assignmentIDs = "assignment_ids", courses, failures }
+    enum CodingKeys: String, CodingKey { case version, generatedAt = "generated_at", siteName = "site_name", studentName = "student_name", sections, supported, assignmentIDs = "assignment_ids", courses, failures }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -81,6 +84,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         siteName = try container.decode(String.self, forKey: .siteName)
         studentName = try container.decodeIfPresent(String.self, forKey: .studentName) ?? ""
         sections = try container.decode(DashboardSections.self, forKey: .sections).suppressingDueSoonDuplicates()
+        supported = try container.decodeIfPresent(DashboardSectionSupport.self, forKey: .supported) ?? .all
         assignmentIDs = try container.decodeIfPresent([String].self, forKey: .assignmentIDs) ?? []
         courses = try container.decodeIfPresent([Course].self, forKey: .courses) ?? []
         failures = try container.decodeIfPresent([String].self, forKey: .failures) ?? []
@@ -93,9 +97,32 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         try container.encode(siteName, forKey: .siteName)
         try container.encode(studentName, forKey: .studentName)
         try container.encode(sections, forKey: .sections)
+        try container.encode(supported, forKey: .supported)
         try container.encode(assignmentIDs, forKey: .assignmentIDs)
         try container.encode(courses, forKey: .courses)
         try container.encode(failures, forKey: .failures)
+    }
+}
+
+public struct DashboardSectionSupport: Codable, Equatable, Sendable {
+    public let dueSoon: Bool
+    public let notifications: Bool
+    public let assignments: Bool
+    public let messages: Bool
+    public let grades: Bool
+
+    public static let all = DashboardSectionSupport()
+
+    public init(dueSoon: Bool = true, notifications: Bool = true, assignments: Bool = true, messages: Bool = true, grades: Bool = true) {
+        self.dueSoon = dueSoon
+        self.notifications = notifications
+        self.assignments = assignments
+        self.messages = messages
+        self.grades = grades
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case dueSoon = "due_soon", notifications, assignments, messages, grades
     }
 }
 
@@ -205,6 +232,60 @@ public struct Course: Codable, Equatable, Sendable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey { case id, name, shortName = "short_name", publishedTotal = "published_total" }
+}
+
+public struct CourseDetail: Codable, Equatable, Sendable {
+    public let version: Int
+    public let course: Course
+    public let assignments: [DashboardItem]
+    public let grades: [CourseGradeItem]
+    public let supported: CourseSectionSupport
+    public let destination: String
+    public let failures: [String]
+}
+
+public struct CourseSectionSupport: Codable, Equatable, Sendable {
+    public let assignments: Bool
+    public let grades: Bool
+}
+
+public struct CourseGradeItem: Codable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let title: String
+    public let publishedGrade: String?
+    public let feedback: String?
+    public let timestamp: String?
+    public let destination: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, publishedGrade = "published_grade", feedback, timestamp, destination
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let string = try? container.decode(String.self, forKey: .id) {
+            id = string
+        } else if let number = try? container.decode(Int.self, forKey: .id) {
+            id = String(number)
+        } else {
+            throw PipoCoreError.invalidResponse
+        }
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Published grade"
+        publishedGrade = try container.decodeIfPresent(String.self, forKey: .publishedGrade)
+        feedback = try container.decodeIfPresent(String.self, forKey: .feedback)
+        timestamp = try container.decodeIfPresent(String.self, forKey: .timestamp)
+        destination = try container.decodeIfPresent(String.self, forKey: .destination) ?? ""
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(publishedGrade, forKey: .publishedGrade)
+        try container.encodeIfPresent(feedback, forKey: .feedback)
+        try container.encodeIfPresent(timestamp, forKey: .timestamp)
+        try container.encode(destination, forKey: .destination)
+    }
 }
 
 public enum DestinationPolicy {

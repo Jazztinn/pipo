@@ -8,9 +8,14 @@ Pipo adapts the Moodle client design and selected read-only behavior from
 - License: MIT
 - Upstream copyright: Copyright (c) 2026 ALinuxPerson
 
-Imported concepts and modules are recorded beside the Rust implementation.
+Adapted upstream paths:
+
+- `src/moodle.rs`: request encoding, response limits, same-origin handling,
+  secret sanitization, and HTML-to-text conversion.
+- `src/server.rs`: read-only Moodle function choices and parameter shapes for
+  courses, assignments, notifications, messages, and grades.
+
 Pipo excludes MCP transports, HTTP listeners, upload support, and write tools.
 
 The upstream repository remains available locally as the
 `openlms-upstream` Git remote for review and security updates.
-

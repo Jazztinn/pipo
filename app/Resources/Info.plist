@@ -6,6 +6,8 @@
     <string>Pipo</string>
     <key>CFBundleExecutable</key>
     <string>PipoApp</string>
+    <key>CFBundleIconFile</key>
+    <string>PipoIcon.png</string>
     <key>CFBundleIdentifier</key>
     <string>com.jazztinn.pipo</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -32,4 +34,3 @@
     <integer>86400</integer>
 </dict>
 </plist>
-

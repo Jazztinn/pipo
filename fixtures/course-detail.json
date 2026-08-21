@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "course": {
+    "id": 12,
+    "name": "Understanding the Self",
+    "short_name": "UTS",
+    "published_total": "1.50"
+  },
+  "assignments": [
+    {
+      "id": 42,
+      "kind": "assignment",
+      "title": "Reflection paper",
+      "course_id": 12,
+      "course_name": "Understanding the Self",
+      "timestamp": "2026-08-23T15:59:00Z",
+      "destination": "/mod/assign/view.php?id=84"
+    }
+  ],
+  "grades": [
+    {
+      "id": 91,
+      "title": "Midterm essay",
+      "published_grade": "1.50",
+      "feedback": "Clear argument and strong references.",
+      "timestamp": "2026-08-20T09:30:00Z",
+      "destination": "/grade/report/user/index.php?id=12"
+    }
+  ],
+  "supported": {
+    "assignments": true,
+    "grades": true
+  },
+  "destination": "/course/view.php?id=12",
+  "failures": []
+}

@@ -1,0 +1,32 @@
+{
+  "usergrades": [
+    {
+      "gradeitems": [
+        {
+          "id": 91,
+          "itemname": "Midterm essay",
+          "itemtype": "mod",
+          "gradeformatted": "1.50",
+          "feedback": "<p>Clear argument and <strong>strong references</strong>.</p>",
+          "gradedategraded": 1787199000,
+          "hidden": 0
+        },
+        {
+          "id": 99,
+          "itemname": "Course total",
+          "itemtype": "course",
+          "gradeformatted": "1.50",
+          "feedback": "",
+          "hidden": 0
+        },
+        {
+          "id": 100,
+          "itemname": "Hidden activity",
+          "itemtype": "mod",
+          "gradeformatted": "1.00",
+          "hidden": 1
+        }
+      ]
+    }
+  ]
+}

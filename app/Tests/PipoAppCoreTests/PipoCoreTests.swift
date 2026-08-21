@@ -34,6 +34,22 @@ import Testing
     #expect(snapshot.presentingNewAssignments(since: []).sections.newAssignments == [assignment])
 }
 
+@Test func refreshBackoffIsBounded() {
+    #expect(PipoRefreshBackoff.delay(failures: 0, base: 900) == 900)
+    #expect(PipoRefreshBackoff.delay(failures: 1, base: 900) == 1_800)
+    #expect(PipoRefreshBackoff.delay(failures: 8, base: 900) == 3_600)
+    #expect(PipoRefreshBackoff.delay(failures: -1, base: 10) == 300)
+}
+
+@Test func sidecarRejectsMismatchedResponseIdentity() throws {
+    let request = SidecarRequest(method: "resolve_destination", params: ["destination": .string("/my/")])
+    let data = Data("{\"version\":1,\"id\":\"different\",\"result\":{\"url\":\"https://lms.lpucavite.edu.ph/my/\"}}".utf8)
+    let response = try JSONDecoder().decode(SidecarResponse.self, from: data)
+    #expect(throws: PipoCoreError.invalidResponse) {
+        try response.validate(for: request)
+    }
+}
+
 @Test func rejectsExternalDestination() throws {
     #expect(throws: PipoCoreError.originRejected) { try DestinationPolicy.resolve("https://example.edu/login") }
     let destination = try DestinationPolicy.resolve("/course/view.php?id=12")
@@ -67,6 +83,22 @@ import Testing
     #expect(!rendered.contains("1.25"))
     #expect(rendered.contains("Professor Reyes"))
     #expect(rendered.contains("Midterm"))
+}
+
+@Test func courseDetailContractDecodesAssignmentsGradesAndFeedback() throws {
+    let fixtureURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("fixtures/course-detail.json")
+    let detail = try JSONDecoder().decode(CourseDetail.self, from: Data(contentsOf: fixtureURL))
+    #expect(detail.course.id == 12)
+    #expect(detail.assignments.count == 1)
+    #expect(detail.grades.first?.publishedGrade == "1.50")
+    #expect(detail.grades.first?.feedback == "Clear argument and strong references.")
+    #expect(detail.supported.assignments)
+    #expect(detail.supported.grades)
 }
 
 @MainActor

@@ -379,6 +379,13 @@ impl MoodleClient {
             "site_name": site.get("sitename").and_then(Value::as_str).unwrap_or("LPU Cavite LMS"),
             "student_name": site.get("fullname").and_then(Value::as_str).unwrap_or(""),
             "sections": { "due_soon": due_soon, "notifications": notifications, "new_assignments": new_assignments, "messages": messages, "grade_feedback": grade_feedback },
+            "supported": {
+                "due_soon": capabilities.contains("core_calendar_get_action_events_by_timesort"),
+                "notifications": capabilities.contains("message_popup_get_popup_notifications"),
+                "assignments": capabilities.contains("mod_assign_get_assignments"),
+                "messages": capabilities.contains("core_message_get_conversations"),
+                "grades": capabilities.contains("gradereport_user_get_grade_items")
+            },
             "assignment_ids": assignment_ids,
             "courses": courses_with_grades,
             "failures": failures
@@ -389,12 +396,91 @@ impl MoodleClient {
         if course_id <= 0 {
             return Err(CoreError::Input("course_id must be positive".to_owned()));
         }
-        self.call(
-            token,
-            "core_course_get_contents",
-            json!({ "courseid": course_id }),
-        )
-        .await
+        let site = self.site_info(token).await?;
+        let user_id = site
+            .get("userid")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| CoreError::Response("site info omitted userid".to_owned()))?;
+        let capabilities = capabilities(&site);
+        let courses = self
+            .call(
+                token,
+                "core_enrol_get_users_courses",
+                json!({ "userid": user_id }),
+            )
+            .await?;
+        let enrolled = courses
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|course| course.get("id").and_then(Value::as_i64) == Some(course_id))
+            .cloned()
+            .ok_or_else(|| {
+                CoreError::Input("course is not enrolled for this account".to_owned())
+            })?;
+        let mut course = course_summary(enrolled);
+        let supports_assignments = capabilities.contains("mod_assign_get_assignments");
+        let supports_grades = capabilities.contains("gradereport_user_get_grade_items");
+        let mut failures = Vec::new();
+
+        let assignments = if supports_assignments {
+            match self
+                .call(
+                    token,
+                    "mod_assign_get_assignments",
+                    json!({ "courseids": [course_id] }),
+                )
+                .await
+            {
+                Ok(value) => assignment_items(&value),
+                Err(error) => {
+                    failures.push(section_failure("Assignments", &error));
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
+        let grades = if supports_grades {
+            match self
+                .call(
+                    token,
+                    "gradereport_user_get_grade_items",
+                    json!({ "courseid": course_id, "userid": user_id }),
+                )
+                .await
+            {
+                Ok(value) => course_grade_items(&value, &course),
+                Err(error) => {
+                    failures.push(section_failure("Grades", &error));
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        if let Some(total) = grades
+            .iter()
+            .find(|item| item.get("is_total") == Some(&Value::Bool(true)))
+            .and_then(|item| item.get("published_grade"))
+            .cloned()
+        {
+            course
+                .as_object_mut()
+                .expect("course object")
+                .insert("published_total".to_owned(), total);
+        }
+
+        Ok(json!({
+            "version": PROTOCOL_VERSION,
+            "course": course,
+            "assignments": assignments,
+            "grades": grades.into_iter().filter(|item| item.get("is_total") != Some(&Value::Bool(true))).collect::<Vec<_>>(),
+            "supported": { "assignments": supports_assignments, "grades": supports_grades },
+            "destination": format!("/course/view.php?id={course_id}"),
+            "failures": failures
+        }))
     }
 
     pub fn resolve_destination(&self, destination: &str) -> Result<Value, CoreError> {
@@ -782,6 +868,45 @@ fn assignment_items(value: &Value) -> Vec<Value> {
 fn published_grade_items(value: &Value, course: &Value) -> Vec<Value> {
     value.get("usergrades").and_then(Value::as_array).and_then(|items| items.first()).and_then(|grade| grade.get("gradeitems")).and_then(Value::as_array).into_iter().flatten().filter(|grade| grade.get("hidden").and_then(Value::as_i64).unwrap_or(0) == 0).map(|grade| json!({ "id": grade.get("id"), "kind": "grade", "title": grade.get("itemname").cloned().unwrap_or(Value::String("Published grade".to_owned())), "course_id": course.get("id"), "course_name": course.get("name"), "timestamp": grade.get("gradedategraded").map(timestamp_value).unwrap_or(Value::Null), "destination": "", "is_total": grade.get("itemtype").and_then(Value::as_str) == Some("course"), "published_total": grade.get("gradeformatted") })).collect()
 }
+fn course_grade_items(value: &Value, course: &Value) -> Vec<Value> {
+    value
+        .get("usergrades")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(|grade| grade.get("gradeitems"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|grade| grade.get("hidden").and_then(Value::as_i64).unwrap_or(0) == 0)
+        .map(|grade| {
+            let course_id = course.get("id").and_then(Value::as_i64).unwrap_or_default();
+            json!({
+                "id": grade.get("id"),
+                "title": grade.get("itemname").cloned().unwrap_or(Value::String("Published grade".to_owned())),
+                "published_grade": grade.get("gradeformatted"),
+                "feedback": grade.get("feedback").and_then(Value::as_str).and_then(plain_feedback),
+                "timestamp": grade.get("gradedategraded").map(timestamp_value).unwrap_or(Value::Null),
+                "destination": format!("/grade/report/user/index.php?id={course_id}"),
+                "is_total": grade.get("itemtype").and_then(Value::as_str) == Some("course")
+            })
+        })
+        .collect()
+}
+fn plain_feedback(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let text = if trimmed.contains('<') && trimmed.contains('>') {
+        html2text::config::plain_no_decorate()
+            .string_from_read(trimmed.as_bytes(), 80)
+            .ok()?
+    } else {
+        trimmed.to_owned()
+    };
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.chars().take(2_000).collect())
+}
 fn timestamp_value(value: &Value) -> Value {
     value
         .as_i64()
@@ -874,5 +999,19 @@ mod tests {
         let available = capabilities(&fixture);
         assert!(available.contains("core_enrol_get_users_courses"));
         assert!(!available.contains("mod_assign_save_submission"));
+    }
+    #[test]
+    fn course_grades_hide_private_items_and_flatten_feedback() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/grades.json")).unwrap();
+        let course = json!({ "id": 12, "name": "Understanding the Self" });
+        let grades = course_grade_items(&fixture, &course);
+        assert_eq!(grades.len(), 2);
+        assert_eq!(grades[0]["published_grade"], "1.50");
+        assert_eq!(
+            grades[0]["feedback"],
+            "Clear argument and strong references."
+        );
+        assert!(grades.iter().all(|item| item["title"] != "Hidden activity"));
     }
 }

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Network
 import Observation
 
 @MainActor
@@ -19,7 +20,9 @@ public final class PipoModel {
     private let notificationService: any PipoNotificationService
     private let urlOpener: (URL) -> Void
     @ObservationIgnored private var automaticRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var networkMonitor: NWPathMonitor?
     @ObservationIgnored private var hasRequestedNotificationAccess = false
+    @ObservationIgnored private var consecutiveRefreshFailures = 0
 
     public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, refreshCoordinator: DashboardRefreshCoordinator, settings: PipoSettings = PipoSettings(), notificationService: any PipoNotificationService = PipoSystemNotifications(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
         self.transport = transport
@@ -43,11 +46,15 @@ public final class PipoModel {
 
     public func start() async {
         await restore()
+        startNetworkMonitor()
         guard automaticRefreshTask == nil else { return }
         automaticRefreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                let interval = max(300, self.settings.refreshInterval)
+                let interval = PipoRefreshBackoff.delay(
+                    failures: self.consecutiveRefreshFailures,
+                    base: self.settings.refreshInterval
+                )
                 try? await Task.sleep(for: .seconds(interval))
                 guard !Task.isCancelled else { return }
                 await self.refresh(force: true)
@@ -107,6 +114,16 @@ public final class PipoModel {
         }
     }
 
+    public func loadCourse(id: Int) async throws -> CourseDetail {
+        guard let token = storedToken() else { throw PipoCoreError.operationFailed("Sign in to load this course.") }
+        let response = try await transport.send(SidecarRequest(
+            method: "load_course",
+            params: ["token": .string(token), "course_id": .number(id)]
+        ))
+        guard let result = response.result else { throw PipoCoreError.invalidResponse }
+        return try JSONDecoder().decode(CourseDetail.self, from: result.encodedData())
+    }
+
     public func signOut() async {
         do {
             try tokenStore.deleteToken()
@@ -118,6 +135,7 @@ public final class PipoModel {
         refreshDate = nil
         authenticationError = nil
         hasRequestedNotificationAccess = false
+        consecutiveRefreshFailures = 0
         notificationService.clear()
         phase = .signedOut
         selectedTab = .dashboard
@@ -129,8 +147,10 @@ public final class PipoModel {
         do {
             snapshot = try await refreshCoordinator.refresh(token: token, force: force, settings: settings)
             if await refreshCoordinator.lastResultUsedCache() {
+                consecutiveRefreshFailures += 1
                 phase = .offline
             } else {
+                consecutiveRefreshFailures = 0
                 refreshDate = Date()
                 phase = .ready
                 if settings.notificationsEnabled, let snapshot {
@@ -146,8 +166,23 @@ public final class PipoModel {
                 }
             }
         } catch {
+            consecutiveRefreshFailures += 1
             if snapshot != nil { phase = .offline } else { fail(error) }
         }
+    }
+
+    private func startNetworkMonitor() {
+        guard networkMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.phase == .offline else { return }
+                await self.refresh(force: true)
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.jazztinn.pipo.network"))
+        networkMonitor = monitor
     }
 
     private func token(from response: SidecarResponse) throws -> String {
@@ -171,5 +206,13 @@ public final class PipoModel {
         let data = Data((0..<32).map { _ in UInt8.random(in: .min ... .max) })
         try? store.save(token: data.base64EncodedString())
         return data
+    }
+}
+
+enum PipoRefreshBackoff {
+    static func delay(failures: Int, base: TimeInterval) -> TimeInterval {
+        let base = min(max(base, 300), 3_600)
+        let multiplier = pow(2.0, Double(min(max(failures, 0), 3)))
+        return min(base * multiplier, 3_600)
     }
 }

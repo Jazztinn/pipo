@@ -21,6 +21,13 @@
     "messages": [],
     "grade_feedback": []
   },
+  "supported": {
+    "due_soon": true,
+    "notifications": true,
+    "assignments": true,
+    "messages": true,
+    "grades": true
+  },
   "courses": [
     {
       "id": 12,
@@ -31,4 +38,3 @@
   ],
   "failures": []
 }
-

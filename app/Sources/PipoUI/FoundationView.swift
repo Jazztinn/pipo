@@ -175,6 +175,7 @@ public struct PipoDashboardSnapshot: Equatable, Sendable {
     public let gradeFeedback: [PipoGradeFeedbackItem]
     public let courses: [PipoCourseItem]
     public let failures: [PipoFailureItem]
+    public let supported: DashboardSectionSupport
 
     public init(
         studentName: String? = nil,
@@ -186,7 +187,8 @@ public struct PipoDashboardSnapshot: Equatable, Sendable {
         messages: [PipoMessageItem] = [],
         gradeFeedback: [PipoGradeFeedbackItem] = [],
         courses: [PipoCourseItem] = [],
-        failures: [PipoFailureItem] = []
+        failures: [PipoFailureItem] = [],
+        supported: DashboardSectionSupport = .all
     ) {
         self.studentName = studentName
         self.generatedAt = generatedAt
@@ -198,6 +200,7 @@ public struct PipoDashboardSnapshot: Equatable, Sendable {
         self.gradeFeedback = gradeFeedback
         self.courses = courses
         self.failures = failures
+        self.supported = supported
     }
 
     public var uniqueNewAssignments: [PipoTaskItem] {
@@ -219,6 +222,7 @@ public struct PipoUIConfiguration {
     public var signInWithToken: @MainActor (String) async throws -> Void
     public var refresh: @MainActor () async throws -> PipoDashboardSnapshot?
     public var signOut: @MainActor () async throws -> Void
+    public var loadCourse: @MainActor (Int) async throws -> CourseDetail?
     public var openURL: @MainActor (URL) -> Void
     public var installUpdate: (@MainActor () -> Void)?
 
@@ -230,6 +234,7 @@ public struct PipoUIConfiguration {
         signInWithToken: @escaping @MainActor (String) async throws -> Void = { _ in },
         refresh: @escaping @MainActor () async throws -> PipoDashboardSnapshot? = { nil },
         signOut: @escaping @MainActor () async throws -> Void = {},
+        loadCourse: @escaping @MainActor (Int) async throws -> CourseDetail? = { _ in nil },
         openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
         installUpdate: (@MainActor () -> Void)? = nil
     ) {
@@ -240,6 +245,7 @@ public struct PipoUIConfiguration {
         self.signInWithToken = signInWithToken
         self.refresh = refresh
         self.signOut = signOut
+        self.loadCourse = loadCourse
         self.openURL = openURL
         self.installUpdate = installUpdate
     }
@@ -261,6 +267,9 @@ public struct PipoUIConfiguration {
             },
             signOut: {
                 await model.signOut()
+            },
+            loadCourse: { courseID in
+                try await model.loadCourse(id: courseID)
             },
             openURL: { url in
                 Task { @MainActor in
@@ -288,9 +297,11 @@ public struct PipoUIConfiguration {
     }
 
     fileprivate static func snapshot(from snapshot: DashboardSnapshot) -> PipoDashboardSnapshot {
-        PipoDashboardSnapshot(
+        let generatedAt = ISO8601DateFormatter().date(from: snapshot.generatedAt)
+        return PipoDashboardSnapshot(
             studentName: snapshot.studentName,
-            generatedAt: ISO8601DateFormatter().date(from: snapshot.generatedAt),
+            generatedAt: generatedAt,
+            cachedAt: generatedAt,
             dueSoon: snapshot.sections.dueSoon.map(item(from:)),
             notifications: snapshot.sections.notifications.map(notification(from:)),
             newAssignments: snapshot.sections.newAssignments.map(item(from:)),
@@ -300,8 +311,10 @@ public struct PipoUIConfiguration {
                 PipoCourseItem(id: String(course.id), name: course.name, shortName: course.shortName ?? "", publishedTotal: course.publishedTotal)
             },
             failures: snapshot.failures.enumerated().map { index, failure in
-                PipoFailureItem(id: "failure-\(index)", section: failure, message: failure)
-            }
+                let parts = failure.split(separator: ":", maxSplits: 1).map(String.init)
+                return PipoFailureItem(id: "failure-\(index)", section: parts.first ?? "LMS", message: parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : failure)
+            },
+            supported: snapshot.supported
         )
     }
 
@@ -371,6 +384,7 @@ public struct PipoRootView: View {
                     selectedCourseID: $selectedCourseID,
                     onRefresh: refresh,
                     onReconnect: refresh,
+                    onLoadCourse: configuration.loadCourse,
                     onOpenURL: openURL,
                     onSettings: { isSettingsPresented = true },
                     onSignOut: { isSignOutConfirmationPresented = true },
@@ -601,6 +615,7 @@ private struct PipoWorkspaceView: View {
     @Binding var selectedCourseID: String?
     let onRefresh: () -> Void
     let onReconnect: () -> Void
+    let onLoadCourse: @MainActor (Int) async throws -> CourseDetail?
     let onOpenURL: (URL) -> Void
     let onSettings: () -> Void
     let onSignOut: () -> Void
@@ -630,7 +645,9 @@ private struct PipoWorkspaceView: View {
                             courses: snapshot?.courses ?? [],
                             selectedCourseID: $selectedCourseID,
                             onRefresh: onRefresh,
-                            onReconnect: onReconnect
+                            onReconnect: onReconnect,
+                            onLoadCourse: onLoadCourse,
+                            onOpenURL: onOpenURL
                         )
                     }
                 }
@@ -689,6 +706,8 @@ private struct PipoTodayView: View {
     let snapshot: PipoDashboardSnapshot?
     let onRefresh: () -> Void
     let onReconnect: () -> Void
+    let onLoadCourse: @MainActor (Int) async throws -> CourseDetail?
+    let onOpenURL: (URL) -> Void
     let onOpenURL: (URL) -> Void
     let onInstallUpdate: (@MainActor () -> Void)?
 
@@ -709,22 +728,30 @@ private struct PipoTodayView: View {
                             .font(.title3.weight(.semibold))
                     }
 
-                    PipoSection(title: "Due soon", systemImage: "calendar.badge.clock") {
-                        PipoItemList(items: snapshot.dueSoon.map { PipoDisplayItem(id: $0.id, title: $0.title, subtitle: $0.courseName, date: $0.dueDate, destination: $0.destination, icon: "calendar") }, onOpenURL: onOpenURL)
+                    if snapshot.supported.dueSoon {
+                        PipoSection(title: "Due soon", systemImage: "calendar.badge.clock") {
+                            PipoItemList(items: snapshot.dueSoon.map { PipoDisplayItem(id: $0.id, title: $0.title, subtitle: $0.courseName, date: $0.dueDate, destination: $0.destination, icon: "calendar") }, onOpenURL: onOpenURL)
+                        }
                     }
-                    PipoSection(title: "Unread notifications", systemImage: "bell.badge") {
-                        PipoItemList(items: snapshot.notifications.map { PipoDisplayItem(id: $0.id, title: $0.title, subtitle: $0.courseName, date: $0.date, destination: $0.destination, icon: "bell") }, onOpenURL: onOpenURL)
+                    if snapshot.supported.notifications {
+                        PipoSection(title: "Unread notifications", systemImage: "bell.badge") {
+                            PipoItemList(items: snapshot.notifications.map { PipoDisplayItem(id: $0.id, title: $0.title, subtitle: $0.courseName, date: $0.date, destination: $0.destination, icon: "bell") }, onOpenURL: onOpenURL)
+                        }
                     }
-                    if !snapshot.uniqueNewAssignments.isEmpty {
+                    if snapshot.supported.assignments, !snapshot.uniqueNewAssignments.isEmpty {
                         PipoSection(title: "New assignments", systemImage: "doc.text") {
                             PipoItemList(items: snapshot.uniqueNewAssignments.map { PipoDisplayItem(id: $0.id, title: $0.title, subtitle: $0.courseName, date: $0.dueDate, destination: $0.destination, icon: "doc.text") }, onOpenURL: onOpenURL)
                         }
                     }
-                    PipoSection(title: "Recent messages", systemImage: "bubble.left.and.bubble.right") {
-                        PipoItemList(items: snapshot.messages.map { PipoDisplayItem(id: $0.id, title: $0.title, subtitle: $0.courseName, date: $0.date, destination: $0.destination, icon: "bubble.left") }, onOpenURL: onOpenURL)
+                    if snapshot.supported.messages {
+                        PipoSection(title: "Recent messages", systemImage: "bubble.left.and.bubble.right") {
+                            PipoItemList(items: snapshot.messages.map { PipoDisplayItem(id: $0.id, title: $0.title, subtitle: $0.courseName, date: $0.date, destination: $0.destination, icon: "bubble.left") }, onOpenURL: onOpenURL)
+                        }
                     }
-                    PipoSection(title: "Grade feedback", systemImage: "checkmark.seal") {
-                        PipoItemList(items: snapshot.gradeFeedback.map { PipoDisplayItem(id: $0.id, title: $0.title, subtitle: $0.courseName, date: $0.date, destination: $0.destination, icon: "checkmark.seal") }, onOpenURL: onOpenURL)
+                    if snapshot.supported.grades {
+                        PipoSection(title: "Grade feedback", systemImage: "checkmark.seal") {
+                            PipoItemList(items: snapshot.gradeFeedback.map { PipoDisplayItem(id: $0.id, title: $0.title, subtitle: $0.courseName, date: $0.date, destination: $0.destination, icon: "checkmark.seal") }, onOpenURL: onOpenURL)
+                        }
                     }
                 } else if phase == .offline {
                     PipoEmptyState(title: "No cached dashboard", message: "Reconnect when the LMS is available.", systemImage: "wifi.slash", actionTitle: "Reconnect", action: onReconnect)
@@ -796,7 +823,7 @@ private struct PipoCoursesView: View {
                 .listStyle(.inset)
                 .navigationDestination(for: String.self) { courseID in
                     if let course = courses.first(where: { $0.id == courseID }) {
-                        PipoCourseDetailView(course: course)
+                        PipoCourseDetailView(course: course, onLoadCourse: onLoadCourse, onOpenURL: onOpenURL)
                     }
                 }
             }
@@ -807,6 +834,11 @@ private struct PipoCoursesView: View {
 @MainActor
 private struct PipoCourseDetailView: View {
     let course: PipoCourseItem
+    let onLoadCourse: @MainActor (Int) async throws -> CourseDetail?
+    let onOpenURL: (URL) -> Void
+    @State private var detail: CourseDetail?
+    @State private var loadError: String?
+    @State private var isLoading = true
 
     var body: some View {
         ScrollView {
@@ -822,12 +854,21 @@ private struct PipoCourseDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
+                if let destination = detail.flatMap({ URL(string: $0.destination, relativeTo: PipoFoundation.lmsOrigin)?.absoluteURL }) {
+                    Button {
+                        onOpenURL(destination)
+                    } label: {
+                        Label("Open course in LMS", systemImage: "arrow.up.right")
+                    }
+                    .buttonStyle(.bordered)
+                }
+
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Published grade")
                         .font(.headline)
-                    if let publishedTotal = course.publishedTotal {
+                    if let publishedTotal = detail?.course.publishedTotal ?? course.publishedTotal {
                         Text(publishedTotal)
                             .font(.title.weight(.semibold))
                             .foregroundStyle(PipoPalette.gold)
@@ -837,11 +878,116 @@ private struct PipoCourseDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                if isLoading {
+                    ProgressView("Loading course")
+                        .controlSize(.small)
+                } else if let loadError {
+                    PipoStateBanner(title: "Course details unavailable", message: loadError, systemImage: "exclamationmark.triangle")
+                } else if let detail {
+                    if detail.supported.assignments {
+                        PipoSection(title: "Assignments", systemImage: "doc.text") {
+                            PipoItemList(
+                                items: detail.assignments.map { item in
+                                    PipoDisplayItem(
+                                        id: item.id,
+                                        title: item.title,
+                                        subtitle: item.courseName,
+                                        date: item.timestamp.flatMap { ISO8601DateFormatter().date(from: $0) },
+                                        destination: URL(string: item.destination, relativeTo: PipoFoundation.lmsOrigin)?.absoluteURL,
+                                        icon: "doc.text"
+                                    )
+                                },
+                                onOpenURL: onOpenURL
+                            )
+                        }
+                    }
+
+                    if detail.supported.grades {
+                        PipoSection(title: "Published grades", systemImage: "checkmark.seal") {
+                            PipoCourseGrades(grades: detail.grades, onOpenURL: onOpenURL)
+                        }
+                    }
+
+                    if !detail.failures.isEmpty {
+                        Text(detail.failures.joined(separator: "\n"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
         }
         .navigationTitle("Course")
+        .task(id: course.id) {
+            guard let courseID = Int(course.id) else {
+                loadError = "This course identifier is invalid."
+                isLoading = false
+                return
+            }
+            do {
+                detail = try await onLoadCourse(courseID)
+                loadError = nil
+            } catch {
+                loadError = "Reconnect and try again."
+            }
+            isLoading = false
+        }
+    }
+}
+
+@MainActor
+private struct PipoCourseGrades: View {
+    let grades: [CourseGradeItem]
+    let onOpenURL: (URL) -> Void
+
+    var body: some View {
+        VStack(spacing: 6) {
+            if grades.isEmpty {
+                Text("No published grade items")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(grades) { grade in
+                    Button {
+                        if let destination = URL(string: grade.destination, relativeTo: PipoFoundation.lmsOrigin)?.absoluteURL {
+                            onOpenURL(destination)
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(grade.title)
+                                    .font(.body.weight(.semibold))
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 8)
+                                if let publishedGrade = grade.publishedGrade {
+                                    Text(publishedGrade)
+                                        .font(.callout.weight(.semibold))
+                                        .foregroundStyle(PipoPalette.gold)
+                                }
+                            }
+                            if let feedback = grade.feedback, !feedback.isEmpty {
+                                Text(feedback)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(10)
+                    .background(PipoPalette.rowBackground, in: RoundedRectangle(cornerRadius: 7))
+                    .accessibilityLabel([grade.title, grade.publishedGrade, grade.feedback].compactMap { $0 }.joined(separator: ", "))
+                }
+            }
+        }
     }
 }
 

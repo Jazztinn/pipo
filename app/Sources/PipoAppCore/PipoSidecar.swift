@@ -92,6 +92,7 @@ public struct PipoCoreProcessTransport: PipoSidecarTransport {
             }
             guard let line = data.split(separator: 0x0A).first else { throw PipoCoreError.invalidResponse }
             let response = try JSONDecoder().decode(SidecarResponse.self, from: Data(line))
+            try response.validate(for: request)
             if let failure = response.error { throw PipoCoreError.operationFailed(failure.message) }
             return response
         }.value
@@ -100,6 +101,14 @@ public struct PipoCoreProcessTransport: PipoSidecarTransport {
     private static func defaultExecutableURL() -> URL {
         if let configured = ProcessInfo.processInfo.environment["PIPO_CORE_PATH"], !configured.isEmpty { return URL(fileURLWithPath: configured) }
         return Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/pipo-core")
+    }
+}
+
+extension SidecarResponse {
+    func validate(for request: SidecarRequest) throws {
+        guard version == request.version, id == request.id else {
+            throw PipoCoreError.invalidResponse
+        }
     }
 }
 
