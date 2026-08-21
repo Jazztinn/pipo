@@ -24,7 +24,12 @@ fi
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/pipo-release.XXXXXX")
 EXTRACTED="$WORK/extracted"
 UPDATES="$WORK/updates"
-trap 'rm -rf "$WORK"' EXIT
+cleanup() {
+  status=$?
+  rm -rf "$WORK"
+  exit "$status"
+}
+trap cleanup EXIT
 
 test -f "$ARCHIVE"
 test -x "$SPARKLE_BIN/generate_appcast"
