@@ -29,6 +29,9 @@ if [ -z "$SPARKLE_FRAMEWORK" ]; then
 fi
 cp -R "$SPARKLE_FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
 
+# SwiftPM links Sparkle with @rpath; point that lookup at the app framework folder.
+install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS/PipoApp"
+
 # Re-seal the assembled beta bundle after copying resources and nested code.
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
