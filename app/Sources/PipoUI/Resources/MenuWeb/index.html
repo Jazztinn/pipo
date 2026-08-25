@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pipo - macOS Menu Bar App</title>
+  <link rel="stylesheet" href="./menu.css">
+  <link rel="stylesheet" href="./css/fontawesome.min.css">
+  <script src="./menu.js" defer></script>
+  <style>
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      min-height: 0;
+      color: #f3f3f5;
+    }
+
+    .mac-window {
+      background: rgba(23, 22, 28, 0.88);
+      backdrop-filter: blur(40px) saturate(200%);
+      -webkit-backdrop-filter: blur(40px) saturate(200%);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: none;
+    }
+
+    .mac-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      backdrop-filter: blur(10px);
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .mac-card:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.15);
+      transform: translateY(-1px);
+    }
+
+    .mac-popover {
+      background: rgba(28, 27, 34, 0.95);
+      backdrop-filter: blur(30px) saturate(190%);
+      -webkit-backdrop-filter: blur(30px) saturate(190%);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.2);
+    }
+
+    .mac-segmented {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .mac-segmented-btn {
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .mac-segmented-btn.active {
+      background: #ff5277; /* Crimson / Light Red accent */
+      color: #ffffff;
+      font-weight: 600;
+      box-shadow: 0 2px 10px rgba(255, 82, 119, 0.35);
+    }
+
+    /* Ultra-Thin macOS Scrollbar */
+    .custom-scroll::-webkit-scrollbar {
+      width: 3px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 82, 119, 0.6);
+    }
+
+    .pink-accent {
+      color: #ff5277;
+    }
+
+    /* Custom Apple Toggle Switch */
+    .apple-switch {
+      appearance: none;
+      width: 36px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.18);
+      border-radius: 12px;
+      position: relative;
+      outline: none;
+      cursor: pointer;
+      transition: background 0.25s ease;
+    }
+
+    .apple-switch:checked {
+      background: #ff5277;
+    }
+
+    .apple-switch::before {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      top: 2px;
+      left: 2px;
+      background: white;
+      transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    .apple-switch:checked::before {
+      transform: translateX(16px);
+    }
+
+    body > .relative {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      display: block;
+    }
+
+    body > .relative > .mac-window.w-\[380px\] {
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      border-radius: 16px;
+    }
+
+    body > .relative > #inspector-panel {
+      position: absolute;
+      z-index: 80;
+      inset: 0;
+      width: 100%;
+      max-width: none;
+      max-height: none;
+      border-radius: 16px;
+    }
+
+    @media (min-width: 720px) {
+      body > .relative {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+      }
+
+      body > .relative > .mac-window.w-\[380px\] {
+        width: 380px;
+        height: 660px;
+        max-width: 380px;
+        flex: 0 0 380px;
+      }
+
+      body > .relative > #inspector-panel {
+        position: relative;
+        inset: auto;
+        width: 340px;
+        max-width: 340px;
+        max-height: 660px;
+        flex: 0 0 340px;
+      }
+    }
+
+    /* Showcase host keeps canonical panes at reference geometry. */
+    html.embedded, html.embedded body { width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0; overflow: hidden; background: transparent; }
+    html.embedded body > .relative { position: fixed; top: 8px; right: 8px; width: 736px; height: auto; margin: 0; display: flex; align-items: flex-start; justify-content: flex-end; gap: 16px; transform: scale(1.27); transform-origin: top right; }
+    html.embedded body > .relative > .mac-window.w-\[380px\] { width: 380px; height: auto; max-width: 380px; flex: 0 0 380px; }
+    html.embedded body > .relative > #inspector-panel { width: 340px; max-width: 340px; max-height: 580px; flex: 0 0 340px; }
+
+    .inspector-enter {
+      animation: inspector-panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .inspector-exit {
+      animation: inspector-panel-out 180ms cubic-bezier(.4, 0, 1, 1) both;
+      pointer-events: none;
+    }
+
+    .view-panel.panel-enter {
+      animation: main-panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .view-panel.panel-exit {
+      animation: main-panel-out 180ms cubic-bezier(.4, 0, 1, 1) both;
+      pointer-events: none;
+    }
+
+    @keyframes inspector-panel-in {
+      from { opacity: 0; filter: blur(8px); transform: translateX(24px); }
+      to { opacity: 1; filter: blur(0); transform: translateX(0); }
+    }
+
+    @keyframes inspector-panel-out {
+      from { opacity: 1; filter: blur(0); transform: translateX(0); }
+      to { opacity: 0; filter: blur(8px); transform: translateX(24px); }
+    }
+
+    @keyframes main-panel-in {
+      from { opacity: 0; filter: blur(7px); transform: translateX(24px); }
+      to { opacity: 1; filter: blur(0); transform: translateX(0); }
+    }
+
+    @keyframes main-panel-out {
+      from { opacity: 1; filter: blur(0); transform: translateX(0); }
+      to { opacity: 0; filter: blur(7px); transform: translateX(24px); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .inspector-enter,
+      .inspector-exit,
+      .view-panel.panel-enter,
+      .view-panel.panel-exit { animation: none; }
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      .mac-window, .mac-popover, .mac-card { backdrop-filter: none; -webkit-backdrop-filter: none; }
+      .mac-window { background: #17161c; }
+      .mac-popover { background: #1c1b22; }
+    }
+
+    @media (prefers-contrast: more) {
+      .mac-window, .mac-popover, .mac-card { border-color: rgba(255,255,255,.34); }
+      button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #ff5277; outline-offset: 2px; }
+    }
+
+    :where(button, input, select):focus-visible { outline: 2px solid #ff5277; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <audio id="pipo-click" src="./pipoclick.mp3" preload="auto"></audio>
+
+  <div class="relative flex gap-4 items-start max-w-5xl w-full justify-center">
+
+    <!-- LEFT SIDE INSPECTOR PANEL (Opens always to the LEFT) -->
+    <div id="inspector-panel" class="mac-window w-[340px] rounded-2xl p-4 hidden flex-col justify-between text-xs transition-all duration-300 animate-fade-in relative z-10 max-h-[580px] custom-scroll overflow-y-auto">
+      <div class="space-y-4">
+        <!-- Inspector Navigation Header -->
+        <div class="flex items-center justify-between border-b border-white/10 pb-2.5">
+          <button class="text-neutral-400 hover:text-white flex items-center gap-1 text-[11px] font-medium transition">
+            <i class="fa-solid fa-chevron-left text-[9px]"></i>
+            <span id="inspector-category">Course</span>
+          </button>
+          <button aria-label="Close details" class="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-white/10 transition">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <!-- Course Header Info -->
+        <div id="inspector-course-header" class="space-y-2">
+          <div class="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 text-base">
+            <i class="fa-solid fa-book-bookmark"></i>
+          </div>
+          <div>
+            <h3 id="inspector-title" class="font-bold text-sm text-white leading-snug">Details</h3>
+            <p id="inspector-subtitle" class="text-[11px] text-neutral-400 mt-1">No item selected</p>
+          </div>
+          <button class="mac-card rounded-lg px-3 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+            <i class="fa-solid fa-arrow-up-right-from-square text-rose-400 text-[10px]"></i> <span id="inspector-open-label">Open course in LMS</span>
+          </button>
+        </div>
+
+        <!-- Grade Banner -->
+        <div id="inspector-grade-banner" class="hidden pt-2 border-t border-white/10">
+          <div class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Published grade</div>
+          <div id="inspector-grade-val" class="text-base font-semibold text-neutral-200 mt-0.5">–</div>
+        </div>
+
+        <!-- Dynamic Body Content -->
+        <div id="inspector-body" class="mac-card rounded-xl p-3 text-neutral-300 leading-relaxed font-normal whitespace-pre-line text-xs">
+          Select an item to view its details.
+        </div>
+
+        <section id="inspector-activity-details" class="hidden space-y-2" aria-label="Activity details">
+          <div class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Activity details</div>
+          <div class="mac-card rounded-xl divide-y divide-white/5 text-xs">
+            <div class="px-3 py-2">
+              <div class="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider">Course</div>
+              <div id="activity-course" class="mt-1 text-neutral-200"></div>
+            </div>
+            <div class="grid grid-cols-2 divide-x divide-white/5">
+              <div class="px-3 py-2">
+                <div class="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider">Instructor</div>
+                <div id="activity-instructor" class="mt-1 text-neutral-200"></div>
+              </div>
+              <div class="px-3 py-2">
+                <div class="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider">Kind</div>
+                <div id="activity-kind" class="mt-1 text-neutral-200"></div>
+              </div>
+            </div>
+            <div class="px-3 py-2">
+              <div class="text-[10px] font-semibold text-rose-400 uppercase tracking-wider">Due</div>
+              <div id="activity-due" class="mt-1 font-mono text-neutral-100"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Assignments List in Inspector -->
+        <div id="inspector-assignments-block" class="space-y-2 pt-1">
+          <div class="flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs">
+            <span class="flex items-center gap-1.5">
+              <i class="fa-regular fa-file-lines text-[11px]"></i>
+              Assignments
+            </span>
+            <i class="fa-solid fa-chevron-up text-[10px] text-neutral-500"></i>
+          </div>
+
+          <div class="space-y-1.5" data-course-assignments="defense">
+            <!-- Assignment item 1 -->
+            <div class="mac-card rounded-lg p-2 flex items-center justify-between text-xs">
+              <div class="min-w-0 pr-2">
+                <div class="font-medium text-neutral-200 truncate flex items-center gap-1.5">
+                  <i class="fa-regular fa-file-lines text-rose-400 text-[11px]"></i>
+                  <span>No upcoming assignment</span>
+                </div>
+                <div class="text-[10px] text-neutral-400 truncate mt-0.5">Course details unavailable</div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="text-[10px] text-neutral-500 font-mono">–</span>
+              </div>
+            </div>
+
+            <!-- Assignment item 2 -->
+            <div class="mac-card rounded-lg p-2 flex items-center justify-between text-xs">
+              <div class="min-w-0 pr-2">
+                <div class="font-medium text-neutral-200 truncate flex items-center gap-1.5">
+                  <i class="fa-regular fa-file-lines text-rose-400 text-[11px]"></i>
+                  <span>No upcoming quiz</span>
+                </div>
+                <div class="text-[10px] text-neutral-400 truncate mt-0.5">Course details unavailable</div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="text-[10px] text-neutral-500 font-mono">–</span>
+              </div>
+            </div>
+          </div>
+          <div class="hidden mac-card rounded-lg p-2 text-xs text-neutral-400" data-course-assignments-empty>
+            No upcoming assignments.
+          </div>
+        </div>
+
+        <!-- Published Grades Block -->
+        <div id="inspector-grades-block" class="space-y-1.5 pt-2">
+          <div class="flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs">
+            <span class="flex items-center gap-1.5">
+              <i class="fa-regular fa-circle-check text-[11px]"></i>
+              Published grades
+            </span>
+            <i class="fa-solid fa-chevron-up text-[10px] text-neutral-500"></i>
+          </div>
+
+          <div class="space-y-1 text-xs">
+            <div class="flex items-center justify-between py-1 px-1 border-b border-white/5">
+              <span class="text-neutral-300 font-medium">No recent feedback</span>
+              <span class="text-neutral-500 font-mono text-[11px]">–</span>
+            </div>
+            <div class="flex items-center justify-between py-1 px-1">
+              <span class="text-neutral-300 font-medium">No grades available</span>
+              <span class="text-neutral-500 font-mono text-[11px]">–</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Actions Grid -->
+        <div class="space-y-1.5 pt-2">
+          <div class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Quick Actions</div>
+          <div class="grid grid-cols-2 gap-2">
+            <button class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
+              <i class="fa-solid fa-arrow-up-right-from-square text-rose-400"></i> Open LMS
+            </button>
+            <button class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
+              <i class="fa-regular fa-copy text-rose-400"></i> Copy Details
+            </button>
+            <button class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
+              <i class="fa-regular fa-eye text-emerald-400"></i> Mark Seen
+            </button>
+            <button class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
+              <i class="fa-regular fa-calendar-plus text-sky-400"></i> Add Calendar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-white/10 text-[10px] text-neutral-500 flex items-center justify-between">
+        <span>Session-only controls</span>
+        <button class="text-rose-400 hover:underline font-medium">Snooze reminder</button>
+      </div>
+    </div>
+
+    <!-- MAIN PIPO POPUP WINDOW -->
+    <div class="mac-window w-[380px] rounded-2xl flex flex-col overflow-hidden text-[13px] relative z-20 shrink-0">
+
+      <!-- Top Title Bar -->
+      <div class="h-10 px-4 flex items-center justify-between border-b border-white/10 relative bg-white/[0.02]">
+        <div class="w-12"></div> <!-- Spacer for optical balance -->
+        <span id="header-title" class="text-[13px] font-semibold text-neutral-200 tracking-tight">Today</span>
+        <button type="button" class="flex items-center gap-1.5 text-[10px] text-neutral-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 hover:bg-white/10 transition">
+            <span class="w-1.5 h-1.5 rounded-full bg-neutral-400"></span>
+          <span id="sync-status">Ready</span>
+        </button>
+      </div>
+
+      <!-- Search & Filter Bar -->
+      <div id="search-section" class="p-3 pb-2 flex items-center gap-2 border-b border-white/5">
+        <div class="relative flex-1">
+          <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 text-xs"></i>
+          <input
+            id="search-input"
+            type="text"
+            placeholder="Search today"
+            class="w-full bg-white/[0.06] border border-white/10 rounded-lg pl-8 pr-3 py-1.5 text-xs text-neutral-200 placeholder-neutral-500 outline-none focus:border-rose-500/60 focus:bg-white/[0.09] transition"
+          >
+          <button id="clear-search" aria-label="Clear search" class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white text-xs">
+            <i class="fa-solid fa-circle-xmark"></i>
+          </button>
+        </div>
+
+        <!-- Filter Dropdown Trigger -->
+        <div class="relative">
+          <button
+            id="filter-toggle"
+            aria-label="Filter dashboard"
+            aria-expanded="false"
+            class="bg-white/[0.06] hover:bg-white/10 border border-white/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 text-neutral-300 hover:text-white transition active:scale-95 text-xs">
+            <i class="fa-solid fa-sliders text-[11px]"></i>
+            <i class="fa-solid fa-chevron-down text-[9px] text-neutral-400"></i>
+          </button>
+
+          <!-- Filter Popover -->
+          <div
+            id="filter-popover"
+            class="hidden absolute right-0 mt-2 w-80 mac-popover rounded-xl z-50 p-2 text-xs divide-y divide-white/10">
+
+            <div class="pb-2">
+              <div class="text-[10px] font-semibold text-neutral-400 px-2 py-1 uppercase tracking-wider">All courses</div>
+              <div class="space-y-0.5 mt-1 max-h-48 custom-scroll overflow-y-auto pr-1">
+                <button class="course-filter-btn w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 text-[11px] truncate flex items-center justify-between bg-white/10">
+                  <span class="truncate">All Courses</span>
+                  <i class="fa-solid fa-check text-rose-400 text-[10px]"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="pt-2 space-y-0.5">
+              <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-200 text-xs">All Activity Types</button>
+              <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Assignments</button>
+              <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Announcements</button>
+              <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Resources</button>
+              <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Messages</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MAIN CONTENT VIEW CANVAS -->
+
+      <!-- VIEW 1: TODAY TAB -->
+      <div id="view-today" class="view-panel custom-scroll overflow-y-auto px-3.5 space-y-3 py-3 h-[480px]">
+
+        <!-- User Greeting Header -->
+        <div class="pt-0.5 flex items-center justify-between">
+          <h2 class="text-sm font-bold text-white tracking-tight">Hello</h2>
+        </div>
+
+        <!-- 1. Up Next Section with Task Placeholders -->
+        <div class="space-y-1" id="section-upnext">
+          <button class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs group">
+            <span class="flex items-center gap-2">
+              <i class="fa-solid fa-sparkles text-[11px]"></i>
+              Up next
+            </span>
+            <i id="arrow-upnext" class="fa-solid fa-chevron-up text-[10px] text-neutral-500 group-hover:text-neutral-300 transition-transform"></i>
+          </button>
+
+          <div id="content-upnext" class="space-y-1.5 transition-all">
+            <div class="mac-card rounded-xl p-2.5 text-xs text-neutral-400">No upcoming work</div>
+          </div>
+        </div>
+
+        <!-- 2. Today's Schedule Section -->
+        <div class="space-y-1" id="section-schedule">
+          <button class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs group">
+            <span class="flex items-center gap-2">
+              <i class="fa-regular fa-calendar text-[11px]"></i>
+              Today's schedule
+            </span>
+            <i id="arrow-schedule" class="fa-solid fa-chevron-up text-[10px] text-neutral-500 group-hover:text-neutral-300 transition-transform"></i>
+          </button>
+          <div id="content-schedule" class="space-y-1.5">
+            <div class="mac-card rounded-xl p-2.5 text-xs text-neutral-400">
+              No events today
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. This Week Section -->
+        <div class="space-y-1" id="section-week">
+          <button class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs group">
+            <span class="flex items-center gap-2">
+              <i class="fa-regular fa-calendar-days text-[11px]"></i>
+              This week
+            </span>
+            <i id="arrow-week" class="fa-solid fa-chevron-up text-[10px] text-neutral-500 group-hover:text-neutral-300 transition-transform"></i>
+          </button>
+          <div id="content-week" class="space-y-1.5">
+            <div class="mac-card rounded-xl p-2.5 text-xs text-neutral-400">No deadlines this week</div>
+          </div>
+        </div>
+
+        <!-- 4. Messages Section -->
+        <div class="space-y-1" id="section-messages">
+          <button class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs group">
+            <span class="flex items-center gap-2">
+              <i class="fa-regular fa-comments text-[11px]"></i>
+              Messages
+            </span>
+            <i id="arrow-messages" class="fa-solid fa-chevron-up text-[10px] text-neutral-500 group-hover:text-neutral-300 transition-transform"></i>
+          </button>
+          <div id="content-messages" class="space-y-1.5">
+            <div class="mac-card rounded-xl p-2.5 text-xs text-neutral-400">No recent messages</div>
+          </div>
+        </div>
+
+        <!-- 5. Grade Feedback Section -->
+        <div class="space-y-1.5" id="section-feedback">
+          <button class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs group">
+            <span class="flex items-center gap-2">
+              <i class="fa-solid fa-certificate text-[11px]"></i>
+              Grade feedback
+            </span>
+            <i id="arrow-feedback" class="fa-solid fa-chevron-up text-[10px] text-neutral-500 group-hover:text-neutral-300 transition-transform"></i>
+          </button>
+
+          <div id="content-feedback" class="space-y-2">
+            <div class="mac-card rounded-xl p-2.5 text-xs text-neutral-400">No recent feedback</div>
+          </div>
+        </div>
+
+        <div class="space-y-1.5" id="section-resources">
+          <button class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs group">
+            <span class="flex items-center gap-2">
+              <i class="fa-regular fa-folder-open text-[11px]"></i>
+              Resources
+            </span>
+            <i id="arrow-resources" class="fa-solid fa-chevron-up text-[10px] text-neutral-500 group-hover:text-neutral-300 transition-transform"></i>
+          </button>
+          <div id="content-resources" class="space-y-2">
+            <div class="mac-card rounded-xl p-2.5 text-xs text-neutral-400">No recent resources</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- VIEW 2: COURSES TAB -->
+      <div id="view-courses" class="view-panel hidden custom-scroll overflow-y-auto px-3.5 space-y-2 py-3 h-[480px]">
+        <div class="mac-card rounded-xl p-3 text-xs text-neutral-400">No courses available</div>
+
+      </div>
+
+      <!-- VIEW 3: SETTINGS TAB (FULL ACCORDING TO USER SCREENSHOTS) -->
+      <div id="view-settings" class="view-panel hidden custom-scroll overflow-y-auto px-3.5 space-y-3.5 py-3 h-[480px]">
+
+        <!-- Connection Section -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Connection</div>
+          <div class="mac-card rounded-xl p-3 space-y-2.5">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-neutral-300 font-medium">LMS origin</span>
+              <span class="text-neutral-400 font-mono text-[11px]">lms.lpucavite.edu.ph</span>
+            </div>
+            <div>
+              <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+                <i class="fa-regular fa-compass text-rose-400 text-xs"></i> Open LMS in browser
+              </button>
+            </div>
+            <div class="flex items-center justify-between border-t border-white/5 pt-2 text-xs">
+              <span class="text-neutral-300 font-medium">Last successful sync</span>
+              <span class="text-neutral-400 font-mono text-[11px]">Not connected</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sync Section -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Sync</div>
+          <div class="mac-card rounded-xl p-3 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-neutral-200 font-medium">Notifications</span>
+              <input type="checkbox" checked class="apple-switch">
+            </div>
+            <div class="space-y-1.5 border-t border-white/5 pt-2.5">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-neutral-300">Refresh every 15 minutes</span>
+                <span class="text-[10px] text-neutral-400 font-mono">15m</span>
+              </div>
+              <input type="range" min="5" max="60" value="15" class="w-full accent-rose-500 bg-white/10 h-1 rounded-lg appearance-none cursor-pointer">
+            </div>
+            <div class="pt-1">
+              <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+                <i class="fa-solid fa-rotate-right text-rose-400 text-xs"></i> Refresh now
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Reminders Section -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Reminders</div>
+          <div class="mac-card rounded-xl p-3 space-y-3 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-neutral-200 font-medium">24 hours before deadline</span>
+              <input type="checkbox" checked class="apple-switch">
+            </div>
+            <div class="flex items-center justify-between border-t border-white/5 pt-2.5">
+              <span class="text-neutral-200 font-medium">1 hour before deadline</span>
+              <input type="checkbox" checked class="apple-switch">
+            </div>
+          </div>
+        </div>
+
+        <!-- Notification categories -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Notification categories</div>
+          <div class="mac-card rounded-xl p-3 space-y-3 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-neutral-200 font-medium">Assignments</span>
+              <input type="checkbox" checked class="apple-switch">
+            </div>
+            <div class="flex items-center justify-between border-t border-white/5 pt-2.5">
+              <span class="text-neutral-200 font-medium">Announcements</span>
+              <input type="checkbox" checked class="apple-switch">
+            </div>
+            <div class="flex items-center justify-between border-t border-white/5 pt-2.5">
+              <span class="text-neutral-200 font-medium">Messages</span>
+              <input type="checkbox" checked class="apple-switch">
+            </div>
+            <div class="flex items-center justify-between border-t border-white/5 pt-2.5">
+              <span class="text-neutral-200 font-medium">Grade feedback</span>
+              <input type="checkbox" checked class="apple-switch">
+            </div>
+          </div>
+        </div>
+
+        <!-- Courses Pinning -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Courses</div>
+          <div id="settings-courses-state" class="mac-card rounded-xl p-3 text-xs text-neutral-400 space-y-1.5">
+            No pinned or hidden courses
+          </div>
+        </div>
+
+        <!-- Calendar Section -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Calendar</div>
+          <div class="mac-card rounded-xl p-3 space-y-2.5 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-neutral-300 font-medium">Authorization</span>
+              <span class="text-neutral-400 font-medium">Not connected</span>
+            </div>
+            <div>
+              <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+                <i class="fa-regular fa-calendar-plus text-rose-400 text-xs"></i> Allow Calendar access
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Storage Section -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Storage</div>
+          <div class="mac-card rounded-xl p-3 text-xs">
+            <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+              <i class="fa-regular fa-trash-can text-rose-400 text-xs"></i> Clear saved dashboard
+            </button>
+          </div>
+        </div>
+
+        <!-- Updates Section -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Updates</div>
+          <div class="mac-card rounded-xl p-3 space-y-2.5 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="text-neutral-300 font-medium">Channel</span>
+              <select class="bg-black/40 border border-white/10 text-neutral-200 text-xs rounded px-2 py-0.5 outline-none">
+                <option value="stable" selected>Stable</option>
+                <option value="beta">Beta</option>
+              </select>
+            </div>
+            <div>
+              <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+                <i class="fa-solid fa-arrow-down-to-line text-rose-400 text-xs"></i> Check for updates
+              </button>
+            </div>
+            <div class="flex items-center justify-between border-t border-white/5 pt-2">
+              <span class="text-neutral-400">Version</span>
+              <span class="text-neutral-300 font-mono text-[11px]">0.4.0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Diagnostics Section -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Diagnostics</div>
+          <div class="mac-card rounded-xl p-3 space-y-2 text-xs">
+            <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+              <i class="fa-solid fa-file-export text-rose-400 text-xs"></i> Export redacted diagnostics
+            </button>
+            <p class="text-[10px] text-neutral-500 leading-relaxed pt-1">
+              Diagnostics exclude tokens, message bodies, grades, excerpts, and student identity.
+            </p>
+          </div>
+        </div>
+
+        <!-- Sign Out Section -->
+        <div class="space-y-1.5">
+          <div class="pt-1">
+            <button class="mac-card w-full rounded-xl p-2.5 text-center text-xs font-medium text-rose-400 hover:bg-rose-500/10 transition">
+              Sign out
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- APPLE-STYLE SEGMENTED NAVIGATION FOOTER -->
+      <div class="p-2.5 border-t border-white/10 bg-white/[0.02] flex justify-center backdrop-blur-md">
+        <div class="mac-segmented p-0.5 rounded-xl flex items-center text-xs w-full max-w-[280px]">
+          <button
+            id="tab-today"
+            class="mac-segmented-btn active flex-1 py-1.5 rounded-lg text-center transition">
+            Today
+          </button>
+          <button
+            id="tab-courses"
+            class="mac-segmented-btn flex-1 py-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 font-medium text-center transition">
+            Courses
+          </button>
+          <button
+            id="tab-settings"
+            class="mac-segmented-btn flex-1 py-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 font-medium text-center transition">
+            Settings
+          </button>
+        </div>
+      </div>
+
+      <!-- TOAST NOTIFICATION -->
+      <div id="toast" class="absolute bottom-[58px] left-1/2 -translate-x-1/2 mac-popover px-4 py-2 rounded-full text-xs font-medium text-white border border-white/20 shadow-2xl transition-all duration-300 opacity-0 translate-y-4 pointer-events-none z-50 flex items-center gap-2 whitespace-nowrap">
+        <i class="fa-solid fa-circle-info text-rose-400"></i>
+        <span id="toast-message">Notification</span>
+      </div>
+
+    </div>
+
+    <!-- ITEM CONTEXT ACTION POPOVER -->
+    <div id="item-context-menu" class="hidden absolute mac-popover rounded-xl w-48 p-1.5 z-50 text-xs space-y-0.5 shadow-2xl">
+      <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
+        <span>Open LMS</span>
+        <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-neutral-400"></i>
+      </button>
+      <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
+        <span>Copy details</span>
+        <i class="fa-regular fa-copy text-[10px] text-neutral-400"></i>
+      </button>
+      <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
+        <span>Mark as seen</span>
+        <i class="fa-regular fa-check-circle text-[10px] text-neutral-400"></i>
+      </button>
+      <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
+        <span>Snooze reminder</span>
+        <i class="fa-regular fa-bell-slash text-[10px] text-neutral-400"></i>
+      </button>
+      <div class="border-t border-white/10 my-1"></div>
+      <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-rose-400 flex items-center justify-between">
+        <span>Add to Calendar</span>
+        <i class="fa-regular fa-calendar-plus text-[10px]"></i>
+      </button>
+    </div>
+
+  </div>
+
+
+  </body>
+</html>

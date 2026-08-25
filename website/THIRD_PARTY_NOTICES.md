@@ -1,14 +1,10 @@
-# Third-Party Notices
+# Third-party notices
 
-## openlms-mcp
+This website adapts component structure and interaction ideas from
+[`Sylonik/macos-ui`](https://github.com/Sylonik/macos-ui), licensed under the
+MIT License.
 
-Pipo includes adapted portions of `openlms-mcp` from
-https://github.com/ALinuxPerson/openlms-mcp at commit
-`c5a09e9f70d56def5e26acea425d1a7dfd514503`.
-
-MIT License
-
-Copyright (c) 2026 ALinuxPerson
+Copyright (c) 2025 Sylonik
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -27,13 +23,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-Dependency license reports will be attached to signed releases.
-
-## Font Awesome Free 6.5.1
-
-Pipo bundles Font Awesome Free webfont and CSS assets for the offline menu UI.
-Icons are licensed under CC BY 4.0, fonts under SIL OFL 1.1, and code under MIT.
-See https://fontawesome.com/license/free.
-
-Copyright Fonticons, Inc.

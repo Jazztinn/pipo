@@ -1,0 +1,16 @@
+{
+  "name": "Pipo",
+  "short_name": "Pipo",
+  "description": "Your LMS meets macOS.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#f2f1ee",
+  "theme_color": "#f2f1ee",
+  "icons": [
+    {
+      "src": "/pipo-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

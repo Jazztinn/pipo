@@ -25,7 +25,10 @@ let package = Package(
         .target(
             name: "PipoUI",
             dependencies: ["PipoAppCore"],
-            path: "app/Sources/PipoUI"
+            path: "app/Sources/PipoUI",
+            resources: [
+                .process("Resources"),
+            ]
         ),
         .executableTarget(
             name: "PipoApp",
@@ -48,4 +51,3 @@ let package = Package(
         ),
     ]
 )
-

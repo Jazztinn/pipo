@@ -120,6 +120,36 @@ scripts/build-local-beta.sh
 scripts/build-dmg.sh dist/Pipo.app dist/Pipo.dmg
 ```
 
+Run the marketing website:
+
+```sh
+cd website
+npm install
+npm run dev
+```
+
+Build and inspect the production website:
+
+```sh
+cd website
+npm ci
+npm run build
+npm run preview
+```
+
+For static domain hosting, set the project root to `website`, run
+`npm run build`, and publish `website/dist`. Configure HTTPS and the custom
+domain in the chosen host. Add the final canonical and social URLs after the
+domain is known.
+
+Build its static deployment output:
+
+```sh
+cd website
+npm run test
+npm run build
+```
+
 ### Project structure
 
 ```text
@@ -134,6 +164,7 @@ pipo/
 ├── contracts/                  # Versioned dashboard schema
 ├── fixtures/                   # Redacted Moodle response fixtures
 ├── docs/                       # Architecture, product, release, and security notes
+├── website/                    # Static marketing website and product demos
 └── scripts/                    # Build, DMG, verification, and release tools
 ```
 

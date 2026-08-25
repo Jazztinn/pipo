@@ -111,3 +111,54 @@ func secureStorageRecoveryRemainsExplicit() async {
 
     #expect(retryCount == 1)
 }
+
+@Test
+@MainActor
+func bundledWebMenuUsesOnlyLocalRuntimeAssets() throws {
+    let url = try #require(PipoWebMenuView.Coordinator.menuResourceURL)
+    let html = try String(contentsOf: url, encoding: .utf8)
+    let runtimeURL = url.deletingLastPathComponent().appendingPathComponent("menu.js")
+    let runtime = try String(contentsOf: runtimeURL, encoding: .utf8)
+
+    #expect(html.contains("./menu.css"))
+    #expect(html.contains("./menu.js"))
+    #expect(!html.contains("https://"))
+    #expect(!html.contains("http://"))
+    #expect(!runtime.contains("https://"))
+    #expect(!runtime.contains("http://"))
+    #expect(!runtime.contains("innerHTML"))
+    #expect(runtime.contains("mode === 'demo'"))
+    #expect(runtime.contains("./demo-fixture.json"))
+}
+
+@Test
+func bridgeRequestRequiresVersionedTypedEnvelope() throws {
+    let valid = #"{"version":1,"requestID":"request-1","action":"refresh","payload":{}}"#.data(using: .utf8)!
+    let request = try JSONDecoder().decode(PipoWebMenuRequestV1.self, from: valid)
+
+    #expect(request.version == 1)
+    #expect(request.requestID == "request-1")
+    #expect(request.action == "refresh")
+
+    let missingVersion = #"{"requestID":"request-2","action":"refresh"}"#.data(using: .utf8)!
+    #expect(throws: DecodingError.self) {
+        try JSONDecoder().decode(PipoWebMenuRequestV1.self, from: missingVersion)
+    }
+}
+
+@Test
+func bridgeResponseKeepsRequestIdentityAndSafeError() throws {
+    let response = PipoWebMenuResponseV1(
+        version: 1,
+        requestID: "request-3",
+        success: false,
+        data: nil,
+        error: "This action is unavailable."
+    )
+    let object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any])
+
+    #expect(object["version"] as? Int == 1)
+    #expect(object["requestID"] as? String == "request-3")
+    #expect(object["success"] as? Bool == false)
+    #expect(object["error"] as? String == "This action is unavailable.")
+}

@@ -12,16 +12,20 @@ struct PipoApp: App {
 
     var body: some Scene {
         Window("Pipo", id: "pipo") {
-            PipoCompanionView(
+            PipoRootView(
                 model: model,
-                installUpdate: updater.isConfigured ? updater.checkForUpdates : nil
+                configuration: PipoUIConfiguration(
+                    model: model,
+                    installUpdate: updater.isConfigured ? updater.checkForUpdates : nil
+                ),
+                hostMode: .window
             )
-            .frame(minWidth: 520, idealWidth: 560, minHeight: 560, idealHeight: 620)
+            .frame(minWidth: 736, idealWidth: 800, minHeight: 660, idealHeight: 680)
             .task {
                 await model.start()
             }
         }
-        .defaultSize(width: 560, height: 620)
+        .defaultSize(width: 800, height: 680)
 
         MenuBarExtra {
             PipoRootView(
@@ -29,9 +33,9 @@ struct PipoApp: App {
                 configuration: PipoUIConfiguration(
                     model: model,
                     installUpdate: updater.isConfigured ? updater.checkForUpdates : nil
-                )
+                ),
+                hostMode: .menuBar
             )
-                .frame(width: 420, height: 620)
         } label: {
             let count = model.snapshot.map {
                 PipoDashboardRanking.urgentCount(snapshot: $0, state: model.localState)

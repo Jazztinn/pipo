@@ -735,14 +735,17 @@ public struct PipoCompanionView: View {
 public struct PipoRootView: View {
     private let model: PipoModel
     private let configuration: PipoUIConfiguration
+    private let hostMode: PipoWebMenuHostMode
     @State private var phase: PipoUIPhase
     @State private var snapshot: PipoDashboardSnapshot?
     @State private var selectedTab: PipoTab = .today
     @State private var selectedCourseID: String?
     @State private var isSignOutConfirmationPresented = false
+    @State private var isInspectorVisible = false
 
-    public init(model: PipoModel, configuration: PipoUIConfiguration = PipoUIConfiguration()) {
+    public init(model: PipoModel, configuration: PipoUIConfiguration = PipoUIConfiguration(), hostMode: PipoWebMenuHostMode = .menuBar) {
         self.model = model
+        self.hostMode = hostMode
         let resolvedConfiguration = configuration.modelBacked ? configuration : PipoUIConfiguration(model: model)
         self.configuration = resolvedConfiguration
         _phase = State(initialValue: resolvedConfiguration.initialPhase)
@@ -758,36 +761,53 @@ public struct PipoRootView: View {
 
     public var body: some View {
         let visiblePhase = configuration.modelBacked ? phase(for: model.phase) : phase
-        let visibleSnapshot = configuration.modelBacked ? model.snapshot.map(PipoUIConfiguration.snapshot(from:)) : snapshot
-
         Group {
-            if visiblePhase == .onboarding {
+            switch visiblePhase {
+            case .onboarding:
                 PipoOnboardingView(
                     onPasswordSignIn: signInWithPassword,
                     onTokenSignIn: signInWithToken,
                     onOpenURL: openURL
                 )
-            } else {
-                PipoWorkspaceView(
+            case .loading:
+                PipoGlassStatusView(title: "Connecting to LPU Cavite LMS", systemImage: "arrow.triangle.2.circlepath")
+            case .failed(let message):
+                PipoOnboardingView(
+                    externalError: message,
+                    onPasswordSignIn: signInWithPassword,
+                    onTokenSignIn: signInWithToken,
+                    onOpenURL: openURL
+                )
+            default:
+                PipoWebMenuView(
                     model: model,
                     configuration: configuration,
-                    phase: visiblePhase,
-                    snapshot: visibleSnapshot,
-                    selectedTab: $selectedTab,
-                    selectedCourseID: $selectedCourseID,
-                    onRefresh: refresh,
-                    onReconnect: refresh,
-                    onLoadCourse: configuration.loadCourse,
-                    onOpenURL: openURL,
-                    onSnapshot: { snapshot = $0 },
-                    onSettings: { selectedTab = .settings },
+                    hostMode: hostMode,
                     onSignOut: { isSignOutConfirmationPresented = true },
-                    onInstallUpdate: configuration.installUpdate
+                    onInspectorVisibilityChanged: { visible in
+                        withAnimation(.easeOut(duration: 0.22)) {
+                            isInspectorVisible = visible
+                        }
+                    }
                 )
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(PipoPalette.windowBackground)
+        .frame(
+            minWidth: hostMode == .window ? 736 : menuBarWidth,
+            idealWidth: hostMode == .window ? 800 : menuBarWidth,
+            maxWidth: hostMode == .menuBar ? menuBarWidth : .infinity,
+            minHeight: hostMode == .window ? 660 : 660,
+            idealHeight: hostMode == .window ? 680 : 660,
+            maxHeight: .infinity
+        )
+        .background {
+            switch visiblePhase {
+            case .onboarding, .loading, .failed:
+                PipoPalette.canvas
+            default:
+                PipoHostMaterial()
+            }
+        }
         .confirmationDialog(
             "Sign out of Pipo?",
             isPresented: $isSignOutConfirmationPresented,
@@ -863,6 +883,27 @@ public struct PipoRootView: View {
         case .failed(let message): .failed(message)
         }
     }
+
+    private var menuBarWidth: CGFloat {
+        isInspectorVisible ? 760 : 420
+    }
+}
+
+@MainActor
+private struct PipoGlassStatusView: View {
+    let title: String
+    let systemImage: String
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: systemImage).font(.system(size: 28, weight: .semibold)).foregroundStyle(PipoPalette.rose)
+            Text(title).font(.headline).foregroundStyle(.white)
+            ProgressView().controlSize(.small).tint(PipoPalette.rose)
+        }
+        .padding(28)
+        .pipoGlassPane(cornerRadius: 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PipoPalette.canvas)
+    }
 }
 
 @MainActor
@@ -883,7 +924,7 @@ private struct PipoOnboardingView: View {
                 HStack(alignment: .top) {
                     Image(systemName: "flag.fill")
                         .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(PipoPalette.maroon)
+                        .foregroundStyle(PipoPalette.rose)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Pipo")
@@ -923,7 +964,7 @@ private struct PipoOnboardingView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(PipoPalette.maroon)
+                        .tint(PipoPalette.rose)
                         .keyboardShortcut(.defaultAction)
                     }
                 } else {
@@ -935,7 +976,7 @@ private struct PipoOnboardingView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(PipoPalette.maroon)
+                        .tint(PipoPalette.rose)
                         .keyboardShortcut(.defaultAction)
                     }
                 }
@@ -948,7 +989,7 @@ private struct PipoOnboardingView: View {
                         .accessibilityLabel(message)
                 }
 
-                Divider()
+                Divider().overlay(Color.white.opacity(0.1))
 
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Read-only access", systemImage: "eye.fill")
@@ -968,7 +1009,14 @@ private struct PipoOnboardingView: View {
                 .help("Open the school LMS in your browser")
             }
             .padding(24)
+            .foregroundStyle(.white)
+            .frame(maxWidth: 420)
+            .pipoGlassPane(cornerRadius: 16)
+            .padding(20)
         }
+        .scrollIndicators(.hidden)
+        .background(PipoPalette.canvas)
+        .preferredColorScheme(.dark)
     }
 
     private func submitPassword() {
@@ -1843,7 +1891,43 @@ private struct PipoToolbarChrome: ViewModifier {
     }
 }
 
+private struct PipoGlassPaneChrome: ViewModifier {
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+                .background(Color(red: 23 / 255, green: 22 / 255, blue: 28 / 255).opacity(0.62))
+                .glassEffect(.regular.tint(PipoPalette.rose.opacity(0.035)), in: RoundedRectangle(cornerRadius: cornerRadius))
+                .overlay(RoundedRectangle(cornerRadius: cornerRadius).stroke(Color.white.opacity(0.12)))
+        } else {
+            content
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+                .background(Color(red: 23 / 255, green: 22 / 255, blue: 28 / 255).opacity(0.88), in: RoundedRectangle(cornerRadius: cornerRadius))
+                .overlay(RoundedRectangle(cornerRadius: cornerRadius).stroke(Color.white.opacity(0.12)))
+        }
+    }
+}
+
+private struct PipoHostMaterial: View {
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            Color.clear.glassEffect(.regular, in: Rectangle())
+        } else {
+            Rectangle().fill(.thinMaterial)
+        }
+    }
+}
+
+private extension View {
+    func pipoGlassPane(cornerRadius: CGFloat) -> some View {
+        modifier(PipoGlassPaneChrome(cornerRadius: cornerRadius))
+    }
+}
+
 private enum PipoPalette {
+    static let rose = Color(red: 1, green: 82 / 255, blue: 119 / 255)
+    static let canvas = Color(red: 12 / 255, green: 11 / 255, blue: 16 / 255)
     static let maroon = Color(red: 0.43, green: 0.08, blue: 0.12)
     static let gold = Color(red: 0.70, green: 0.48, blue: 0.10)
     static let warning = Color.orange

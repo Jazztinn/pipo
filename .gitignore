@@ -9,3 +9,6 @@ target/
 .env
 .env.*
 !.env.example
+website/node_modules/
+website/dist/
+website/public/pipo-menu/

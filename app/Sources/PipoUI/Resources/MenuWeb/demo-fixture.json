@@ -1,0 +1,21 @@
+{
+  "revision": 1,
+  "phase": "ready",
+  "title": "Today",
+  "studentName": "Totoy",
+  "generatedAt": "2026-08-25T09:00:00Z",
+  "nextUp": [{ "id": "next-1", "title": "Activity 1 - Patronus Practice", "courseName": "HOGW01 - Defense Against the Dark Arts", "due": "3 days, 1 hr", "body": "Practice summoning a corporeal Patronus and submit reflection." }],
+  "schedule": [{ "id": "schedule-1", "title": "Lecture: Multi-variable Summation", "courseName": "MATH02 - Advanced Arithmancy", "date": "Today · 2:00 PM", "body": "Room 4B. Bring your annotated notes." }],
+  "dueSoon": [{ "id": "due-1", "title": "Essay: The Ethics of Magic", "courseName": "ETHC01 - Ethics of Magic", "due": "Tomorrow · 11:59 PM", "body": "Draft saved in LMS. Final submission due tomorrow." }],
+  "messages": [{ "id": "message-1", "title": "Professor McGonagall", "courseName": "MATH02", "body": "Your revised proof looks strong. Please include one more worked example." }],
+  "gradeFeedback": [{ "id": "grade-1", "title": "Quiz 2 published", "courseName": "MATH02 - Advanced Arithmancy", "body": "Grade: 98/100\nFeedback: Excellent work on expanding multi-variable summation notation." }],
+  "announcements": [{ "id": "announcement-1", "title": "Library hours extended", "courseName": "LPU Cavite LMS", "body": "Library stays open until 10 PM during examination week." }],
+  "resources": [{ "id": "resource-1", "title": "Week 4 reading pack", "courseName": "HOGW01", "body": "Required reading and lecture slides are available in the LMS." }],
+  "courses": [
+    { "id": "course-hogw01", "title": "HOGW01 - Defense Against the Dark Arts", "courseCode": "HOGW-HOGW01", "subtitle": "Hogwarts Term 1", "body": "Professor Dumbledore · 4 activities" },
+    { "id": "course-math02", "title": "MATH02 - Advanced Arithmancy", "courseCode": "MATH-MATH02", "subtitle": "Hogwarts Term 1", "body": "Professor McGonagall · 7 activities" },
+    { "id": "course-ethc01", "title": "ETHC01 - Ethics of Magic", "courseCode": "ETHC-ETHC01", "subtitle": "Hogwarts Term 1", "body": "Professor Gandalf · 3 activities" }
+  ],
+  "settings": { "notifications": true, "reminders": true },
+  "supported": { "nextUp": true, "schedule": true, "messages": true, "courses": true }
+}

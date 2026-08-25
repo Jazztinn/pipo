@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Pipo privacy policy for LMS access, local storage, and optional macOS features." />
+    <title>Privacy Policy — Pipo</title>
+    <link rel="icon" type="image/png" href="./pipo-logo.png" />
+    <link rel="stylesheet" href="./src/legal.css" />
+  </head>
+  <body>
+    <header class="site-header"><nav class="site-nav" aria-label="Main navigation">
+      <a class="brand" href="./index.html" aria-label="Pipo home"><img src="./pipo-logo.png" alt="" width="34" height="34" /><strong>pipo</strong></a>
+      <div class="nav-actions"><a class="download-button" href="https://github.com/Jazztinn/pipo/releases/latest"><span class="apple-mark" aria-hidden="true">&#63743;</span> Download</a></div>
+    </nav></header>
+    <audio id="pipo-cartoon-sound" preload="auto"><source src="./pipocartoon.mp3" type="audio/mpeg" /><source src="./pipocartoon.wav" type="audio/wav" /></audio>
+    <main class="legal-shell">
+      <header class="legal-header"><h1><span>Privacy</span><span>Policy</span></h1><div class="legal-header-meta"><p>How Pipo handles LMS access, local data, and optional macOS features.</p><small class="legal-effective">Effective August 23, 2026</small></div></header>
+      <div class="legal-layout">
+        <nav class="legal-toc" aria-label="Privacy policy sections">
+          <a href="#overview" class="is-active"><span aria-hidden="true"></span><strong>Overview</strong></a><a href="#lms-access"><span aria-hidden="true"></span><strong>LMS access</strong></a><a href="#local-data"><span aria-hidden="true"></span><strong>Data on your Mac</strong></a><a href="#website"><span aria-hidden="true"></span><strong>Website data</strong></a><a href="#services"><span aria-hidden="true"></span><strong>Other services</strong></a><a href="#deletion"><span aria-hidden="true"></span><strong>Deletion</strong></a><a href="#support"><span aria-hidden="true"></span><strong>Support</strong></a><a href="#changes"><span aria-hidden="true"></span><strong>Changes</strong></a>
+        </nav>
+        <article class="legal-content">
+          <section id="overview"><div class="legal-section-heading"><h2>Overview</h2></div><p>Pipo is an independent macOS utility for LPU Cavite students. It connects directly to the LPU Cavite Moodle service and keeps its working data on your Mac. Pipo does not operate an account or cloud-sync service.</p></section>
+          <section id="lms-access"><div class="legal-section-heading"><h2>LMS access</h2></div><p>Pipo sends your sign-in credentials to <strong>https://lms.lpucavite.edu.ph</strong> only to obtain an LMS access token. Your password is discarded after that exchange. Pipo then uses the token for read-only Moodle requests.</p><p>Pipo can retrieve your identity, enrolled courses, assignments, due dates, schedules, announcements, message metadata, grade feedback, submission status, and course resources when available from the LMS. Pipo does not submit assignments, send messages, mark LMS items read, or upload content.</p></section>
+          <section id="local-data"><div class="legal-section-heading"><h2>Data on your Mac</h2></div><ul><li>Your LMS token and cache-encryption key are stored in macOS Keychain.</li><li>An encrypted local database stores the latest dashboard snapshot and local state such as seen items, snoozes, pinned courses, and hidden courses.</li><li>Refresh, notification, reminder, and quiet-hour preferences are stored in macOS user defaults.</li></ul></section>
+          <section id="website"><div class="legal-section-heading"><h2>Website data</h2></div><p>The Pipo website stores a visit count in your browser’s local storage and a session flag in session storage. Current website source contains no analytics integration.</p><p>Clicking “Continue on GitHub” sends your entered report and optional email to GitHub in a new-issue URL so you can review it before posting. The hosting provider may process standard request data under its own terms.</p></section>
+          <section id="services"><div class="legal-section-heading"><h2>Other services</h2></div><p>Pipo interacts with LPU Cavite Moodle, macOS Keychain, Notifications, Calendar, GitHub Releases, GitHub Issues, and GitHub-hosted update feeds only for the functions described above. Those services apply their own privacy practices.</p></section>
+          <section id="deletion"><div class="legal-section-heading"><h2>Deletion</h2></div><p>Signing out removes Pipo’s LMS token, encrypted dashboard cache, encrypted local state, and Pipo notifications from your Mac. App preferences may remain until you remove Pipo’s app data. Removing Pipo does not delete data held by your school, GitHub, Apple, hosting providers, or device backups.</p></section>
+          <section id="support"><div class="legal-section-heading"><h2>Diagnostics and support</h2></div><p>Pipo can create a diagnostic report when you choose to export one. Reports are designed to redact credentials and sensitive LMS content, but review any report before sharing it.</p><p>For policy questions, use <a href="https://github.com/Jazztinn/pipo/issues">GitHub Issues</a> without posting credentials or private LMS data. Report security problems through GitHub’s private vulnerability reporting when available.</p></section>
+          <section id="changes"><div class="legal-section-heading"><h2>Changes</h2></div><p>This policy may change when Pipo’s features or data practices change. The effective date above identifies the current version.</p></section>
+        </article>
+      </div>
+      <footer class="legal-footer"><span>© 2026 Pipo</span><nav aria-label="Legal pages"><a href="./privacy.html" aria-current="page">Privacy</a><a href="./terms.html">Terms</a></nav></footer>
+    </main>
+    <script type="module" src="./src/legal.js"></script>
+  </body>
+</html>

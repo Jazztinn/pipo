@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en" class="page-loading">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Pipo puts LPU Cavite LMS courses, deadlines, and announcements in your Mac menu bar."
+    />
+    <meta name="theme-color" content="#f2f1ee" />
+    <meta name="application-name" content="Pipo" />
+    <meta name="apple-mobile-web-app-title" content="Pipo" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Pipo — Your LMS meets macOS" />
+    <meta
+      property="og:description"
+      content="Pipo puts LPU Cavite LMS courses, deadlines, and announcements in your Mac menu bar."
+    />
+    <meta property="og:url" content="https://pipo.jazztinn.me/" />
+    <meta property="og:image" content="https://pipo.jazztinn.me/pipo-logo.png" />
+    <title>Pipo — Your LMS meets macOS</title>
+    <link rel="canonical" href="https://pipo.jazztinn.me/" />
+    <link rel="icon" type="image/png" href="/pipo-logo.png" />
+    <link rel="apple-touch-icon" href="/pipo-logo.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/macos/macos.css" />
+    <style>
+      html { background: #f2f1ee; }
+      .page-loading body { visibility: hidden; }
+    </style>
+    <noscript><style>body { visibility: visible; }</style></noscript>
+  </head>
+  <body>
+    <script>
+      if (location.protocol === "file:" && !location.pathname.includes("/dist/")) {
+        location.replace(new URL("./dist/index.html", location.href));
+      }
+
+      window.setTimeout(() => document.documentElement.classList.remove("page-loading"), 4000);
+    </script>
+    <div id="page-surface">
+    <a class="skip-link" href="#main-content">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Main navigation">
+        <a class="brand" href="#top" aria-label="Pipo home">
+          <img class="brand-icon" src="/pipo-logo.png" alt="" width="34" height="34" />
+          <strong>pipo</strong>
+        </a>
+
+        <p class="interaction-count" aria-live="polite" aria-atomic="true" data-visit-count>
+          Pipo has had <strong data-visit-number>50</strong> visits
+        </p>
+
+        <div class="nav-actions">
+          <a class="download-button" href="https://github.com/Jazztinn/pipo/releases/latest">
+            <span class="apple-mark" aria-hidden="true">&#63743;</span> Download
+          </a>
+        </div>
+      </nav>
+    </header>
+
+    <audio id="pipo-cartoon-sound" preload="auto">
+      <source src="/pipocartoon.mp3" type="audio/mpeg" />
+      <source src="/pipocartoon.wav" type="audio/wav" />
+    </audio>
+    <script>
+      document.getElementById('pipo-cartoon-sound').volume = 0.35;
+    </script>
+
+    <main id="main-content" class="horizontal-stage" data-horizontal-stage>
+      <div class="horizontal-track" data-horizontal-track>
+        <section class="panel hero-panel" id="top" aria-labelledby="hero-title" data-panel>
+          <div class="demo-slot demo-slot-hero" aria-label="Interactive macOS desktop preview">
+            <div class="macbook-chassis">
+              <img class="macbook-device-frame" src="/macbook-pro-13-original.svg" alt="" draggable="false" />
+              <div class="macbook-screen">
+                <div id="macos-hero-root"></div>
+                <div class="macos-screen-corners" aria-hidden="true">
+                  <span class="macos-screen-corner macos-screen-corner-tl"></span>
+                  <span class="macos-screen-corner macos-screen-corner-tr"></span>
+                  <span class="macos-screen-corner macos-screen-corner-bl"></span>
+                  <span class="macos-screen-corner macos-screen-corner-br"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-copy">
+            <span class="pipo-app-icon" aria-hidden="true">
+              <img src="/pipo-logo.png" alt="" width="112" height="112" />
+            </span>
+            <h1 id="hero-title">Your LMS<br /><span>meets macOS.</span></h1>
+            <p>Pipo keeps courses, deadlines, and announcements one click away from your Mac menu bar.</p>
+            <div class="hero-actions">
+              <a class="primary-button" href="https://github.com/Jazztinn/pipo/releases/latest">
+                <span class="apple-mark" aria-hidden="true">&#63743;</span> Download for Mac
+              </a>
+              <a class="text-link" href="https://github.com/Jazztinn/pipo">View on GitHub <span aria-hidden="true">↗</span></a>
+            </div>
+            <small>macOS 14+ · Open source · <a href="./privacy.html">Privacy</a> · <a href="./terms.html">Terms</a></small>
+          </div>
+        </section>
+
+        <section class="panel showcase-panel" aria-labelledby="action-title" data-panel>
+          <div class="statement-copy">
+            <h2 id="action-title">See it in action.</h2>
+          </div>
+          <div class="demo-slot" aria-hidden="true"></div>
+        </section>
+
+        <section class="panel feedback-panel" aria-labelledby="feedback-title" data-panel>
+          <div class="feedback-copy">
+            <h2 id="feedback-title">Found a bug?<br />Got an idea?</h2>
+            <p>Tell us what happened or what would make Pipo better.</p>
+          </div>
+
+          <form class="feedback-form" data-feedback-form>
+            <fieldset class="feedback-types">
+              <legend class="visually-hidden">Feedback type</legend>
+              <button type="button" aria-pressed="false" data-feedback-type="Bug">
+                Bug
+              </button>
+              <button type="button" aria-pressed="true" data-feedback-type="Feedback">
+                Feedback
+              </button>
+              <button type="button" aria-pressed="false" data-feedback-type="Idea">
+                Idea
+              </button>
+            </fieldset>
+
+            <div class="feedback-message">
+              <label for="feedback-text">What’s working, what isn’t, or what feels off?</label>
+              <textarea id="feedback-text" name="feedback" maxlength="4000" required></textarea>
+              <output for="feedback-text" data-character-count>0/4000</output>
+            </div>
+
+            <label class="feedback-email">
+              <span class="visually-hidden">Email address</span>
+              <input type="email" name="email" autocomplete="email" placeholder="Email (optional — for a reply)" />
+            </label>
+
+            <div class="feedback-actions">
+              <button class="feedback-submit primary-button" type="submit">Send feedback <span aria-hidden="true">↗</span></button>
+              <button class="feedback-submit feedback-github-button" type="button" data-github-submit>
+                Continue on GitHub
+                <svg class="github-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5a9.5 9.5 0 0 0-3 18.51c.48.09.65-.21.65-.46v-1.67c-2.65.58-3.21-1.12-3.21-1.12-.44-1.1-1.06-1.39-1.06-1.39-.87-.6.07-.59.07-.59.96.07 1.47.99 1.47.99.85 1.46 2.22 1.04 2.76.8.09-.62.33-1.04.6-1.28-2.11-.24-4.33-1.06-4.33-4.7 0-1.04.37-1.88.98-2.54-.1-.24-.43-1.2.09-2.5 0 0 .8-.26 2.62.97a9.1 9.1 0 0 1 4.77 0c1.82-1.23 2.62-.97 2.62-.97.52 1.3.19 2.26.09 2.5.61.66.98 1.5.98 2.54 0 3.65-2.22 4.46-4.34 4.7.34.29.64.86.64 1.74v2.52c0 .25.17.55.65.46A9.5 9.5 0 0 0 12 2.5Z" /></svg>
+              </button>
+            </div>
+            <small>Choose email or GitHub to send your feedback.</small>
+          </form>
+        </section>
+
+        <footer class="panel closing-panel" aria-labelledby="closing-title" data-panel>
+          <div class="closing-copy">
+            <span class="pipo-app-icon" aria-hidden="true">
+              <img src="/pipo-logo.png" alt="" width="112" height="112" />
+            </span>
+            <h2 id="closing-title">Keep school<br />one click away.</h2>
+            <a class="primary-button" href="https://github.com/Jazztinn/pipo/releases/latest">
+              <span class="apple-mark" aria-hidden="true">&#63743;</span> Download for Mac
+            </a>
+            <small>Requires macOS 14 or later · Current builds are not notarized</small>
+          </div>
+
+          <div class="footer-links">
+            <strong>© 2026 Pipo</strong>
+            <a href="https://github.com/Jazztinn/pipo">GitHub</a>
+            <a href="./privacy.html">Privacy</a>
+            <a href="./terms.html">Terms</a>
+          </div>
+        </footer>
+      </div>
+    </main>
+    </div>
+
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
