@@ -15,11 +15,22 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Framewor
 
 cargo build --manifest-path "$ROOT/rust/Cargo.toml" --release --bin pipo-core
 swift build --package-path "$ROOT" -c release
+SWIFT_BIN_PATH=$(swift build --package-path "$ROOT" -c release --show-bin-path)
 
 cp "$ROOT/.build/release/PipoApp" "$APP/Contents/MacOS/PipoApp"
 cp "$ROOT/rust/target/release/pipo-core" "$APP/Contents/MacOS/pipo-core"
 cp "$ROOT/app/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/app/Resources/PipoIcon.png" "$APP/Contents/Resources/PipoIcon.png"
+
+PIPO_UI_BUNDLE="$SWIFT_BIN_PATH/Pipo_PipoUI.bundle"
+if [ ! -d "$PIPO_UI_BUNDLE/MenuWeb" ]; then
+  echo "PipoUI resource bundle was not produced with MenuWeb assets."
+  exit 1
+fi
+cp -R "$PIPO_UI_BUNDLE" "$APP/Contents/Resources/Pipo_PipoUI.bundle"
+test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/MenuWeb/index.html"
+test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/MenuWeb/css/fontawesome.min.css"
+test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/MenuWeb/webfonts/fa-solid-900.woff2"
 
 SPARKLE_FRAMEWORK=$(find "$ROOT/.build" -type d -name Sparkle.framework -print -quit)
 if [ -z "$SPARKLE_FRAMEWORK" ]; then

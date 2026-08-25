@@ -174,13 +174,24 @@ struct PipoWebMenuView: NSViewRepresentable {
             self.onInspectorVisibilityChanged = onInspectorVisibilityChanged
         }
 
-        static var menuResourceURL: URL? { Bundle.module.url(forResource: "index", withExtension: "html", subdirectory: "MenuWeb") }
+        static var menuResourceRoot: URL? {
+            if let packaged = Bundle.main.resourceURL?
+                .appendingPathComponent("Pipo_PipoUI.bundle", isDirectory: true)
+                .appendingPathComponent("MenuWeb", isDirectory: true),
+               FileManager.default.fileExists(atPath: packaged.appendingPathComponent("index.html").path)
+            {
+                return packaged
+            }
+            let module = Bundle.module.resourceURL?.appendingPathComponent("MenuWeb", isDirectory: true)
+            return module.flatMap { FileManager.default.fileExists(atPath: $0.appendingPathComponent("index.html").path) ? $0 : nil }
+        }
 
         func loadMenu(in view: WKWebView) {
-            guard let root = Bundle.module.resourceURL?.appendingPathComponent("MenuWeb", isDirectory: true), let index = Self.menuResourceURL else {
+            guard let root = Self.menuResourceRoot else {
                 view.loadHTMLString("<p>Pipo menu resources are unavailable.</p>", baseURL: nil)
                 return
             }
+            let index = root.appendingPathComponent("index.html")
             view.loadFileURL(index, allowingReadAccessTo: root)
         }
 

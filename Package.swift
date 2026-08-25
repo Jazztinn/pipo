@@ -27,7 +27,7 @@ let package = Package(
             dependencies: ["PipoAppCore"],
             path: "app/Sources/PipoUI",
             resources: [
-                .process("Resources"),
+                .copy("Resources/MenuWeb"),
             ]
         ),
         .executableTarget(
