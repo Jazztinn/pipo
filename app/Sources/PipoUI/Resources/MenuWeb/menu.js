@@ -17,7 +17,7 @@
   const field = (value, fallback = '—') => value == null || value === '' ? fallback : value;
   const itemTitle = item => field(item?.title || item?.name || item?.shortName || item?.label, 'Untitled item');
   const itemText = item => [item?.courseName, item?.subtitle, item?.timestamp || item?.date, item?.due].filter(Boolean).join(' · ');
-  function request(action, payload = {}) {
+  function request(action, payload = {}, source = 'main') {
     if (!allowed.has(action)) return null;
     if (action !== 'ui.ready' && action !== 'setInspectorVisible') {
       const audio = document.getElementById('pipo-click');
@@ -27,10 +27,10 @@
     const outbound = { ...payload, requestID: generatedID, revision };
     const nativeID = nativeBridge?.request ? nativeBridge.request(action, outbound) : null;
     const requestID = typeof nativeID === 'string' && nativeID ? nativeID : generatedID;
-    requests.set(requestID, { action, payload: outbound });
+    requests.set(requestID, { action, payload: outbound, source });
     const message = { action, payload: { ...outbound, requestID } };
     window.dispatchEvent(new CustomEvent('pipo:request', { detail: { requestID, ...message } }));
-    if (mode === 'demo') window.setTimeout(() => resolveResponse({ requestID, success: true, message: `${action} complete` }), 80);
+    if (mode === 'demo') window.setTimeout(() => resolveResponse({ requestID, success: true }), 80);
     return requestID;
   }
   function resolveResponse(response) {
@@ -38,13 +38,18 @@
     const pending = requests.get(response.requestID); requests.delete(response.requestID);
     if (pending?.action === 'loadCourse' && response.data) renderCourseDetail(response.data);
     const labels = { refresh: 'Pipo refreshed', refreshSection: 'Section refreshed', markSeen: 'Marked as seen', undoSeen: 'Restored as unseen', snooze: 'Snoozed for one hour', openDestination: 'Opened in LMS', copyDetails: 'Details copied', addToCalendar: 'Added to Calendar', requestCalendarAccess: 'Calendar access updated', pinCourse: 'Course pinned', unpinCourse: 'Course unpinned', hideCourse: 'Course hidden', restoreCourse: 'Course restored', updateSettings: 'Settings saved', updateChannel: 'Update channel saved', clearCache: 'Saved dashboard cleared', checkForUpdates: 'Update check started', exportDiagnostics: 'Diagnostics exported', retrySecureStorage: 'Secure storage checked' };
-    if (response.success === false) showToast(response.error || 'Action failed');
-    else if (labels[pending?.action]) showToast(response.message || labels[pending.action]);
+    if (response.success === false) showToast(response.error || 'Action failed', pending?.source);
+    else if (labels[pending?.action]) showToast(response.message || labels[pending.action], pending?.source);
   }
   if (!nativeBridge?.request) window.pipo = { version: 1, available: false, mode, request };
   else window.pipo = Object.freeze({ ...nativeBridge, mode, request });
-  function showToast(message) {
+  function showToast(message, source = 'main') {
     const toast = document.getElementById('toast'); const target = document.getElementById('toast-message'); if (!toast || !target) return;
+    const inspector = document.getElementById('inspector-panel'); const shell = document.getElementById('pipo-shell');
+    const useInspector = source === 'inspector' && inspector && !inspector.classList.contains('hidden');
+    const panel = useInspector ? inspector : document.getElementById('main-panel');
+    if (shell && toast.parentElement !== shell) shell.append(toast);
+    if (panel) { toast.style.left = `${panel.offsetLeft + panel.offsetWidth / 2}px`; toast.style.top = `${panel.offsetTop + panel.offsetHeight - (useInspector ? 48 : 62)}px`; toast.style.bottom = 'auto'; }
     target.textContent = String(message); toast.classList.remove('opacity-0', 'translate-y-4'); toast.classList.add('opacity-100', 'translate-y-0');
     window.clearTimeout(showToast.timer); showToast.timer = window.setTimeout(() => { toast.classList.add('opacity-0', 'translate-y-4'); toast.classList.remove('opacity-100', 'translate-y-0'); }, 2200);
   }
@@ -171,7 +176,7 @@
     document.querySelector('#view-settings input[type="range"]')?.addEventListener('change', event => request('updateSettings', { refreshMinutes: Number(event.target.value) }));
     document.querySelectorAll('select').forEach(select => select.addEventListener('change', () => request('updateChannel', { channel: select.value })));
     const inspectorButtons = document.querySelectorAll('#inspector-panel button'); inspectorButtons[0]?.addEventListener('click', closeInspectorSafe); inspectorButtons[1]?.addEventListener('click', closeInspectorSafe);
-    document.addEventListener('click', event => { const menu = document.getElementById('item-context-menu'); if (!event.target.closest('#item-context-menu')) menu?.classList.add('hidden'); const actionButton = event.target.closest('[data-action]'); if (!actionButton) return; const rawAction = actionButton.dataset.action; if (rawAction.startsWith('selectTab:')) return; if (rawAction === 'closeInspector') return closeInspectorSafe(); if (rawAction === 'clearCache' && !window.confirm('Clear the saved dashboard? Pipo will fetch it again on refresh.')) return; const itemID = selectedType === 'course' ? null : selectedItem?.id; const courseID = actionButton.dataset.courseId || (selectedType === 'course' ? (selectedItem?.id || selectedItem?.courseID) : null); const payload = actionButton.dataset.lmsRoot === 'true' ? { lmsRoot: true } : courseID ? { courseID } : itemID ? { itemID } : {}; request(rawAction, payload); menu?.classList.add('hidden'); event.preventDefault(); event.stopImmediatePropagation(); }, true);
+    document.addEventListener('click', event => { const menu = document.getElementById('item-context-menu'); if (!event.target.closest('#item-context-menu')) menu?.classList.add('hidden'); const actionButton = event.target.closest('[data-action]'); if (!actionButton) return; const rawAction = actionButton.dataset.action; if (rawAction.startsWith('selectTab:')) return; if (rawAction === 'closeInspector') return closeInspectorSafe(); if (rawAction === 'clearCache' && !window.confirm('Clear the saved dashboard? Pipo will fetch it again on refresh.')) return; const itemID = selectedType === 'course' ? null : selectedItem?.id; const courseID = actionButton.dataset.courseId || (selectedType === 'course' ? (selectedItem?.id || selectedItem?.courseID) : null); const payload = actionButton.dataset.lmsRoot === 'true' ? { lmsRoot: true } : courseID ? { courseID } : itemID ? { itemID } : {}; const source = actionButton.closest('#inspector-panel') ? 'inspector' : 'main'; request(rawAction, payload, source); menu?.classList.add('hidden'); event.preventDefault(); event.stopImmediatePropagation(); }, true);
     document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeInspectorSafe(); document.getElementById('filter-popover')?.classList.add('hidden'); } });
   }
   window.pipoMenu = Object.freeze({ applyState, filterCards, request, switchTab, mode });

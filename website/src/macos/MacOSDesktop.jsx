@@ -171,7 +171,7 @@ function AboutPipo({ onClose }) {
         </div>
         <img className="macos-about-icon" src="./pipo-logo.png" alt="" draggable="false" />
         <h2 id="macos-about-title">Pipo</h2>
-        <p>Version 0.4.0 (8)</p>
+        <p>Version 0.4.1 (9)</p>
         <p className="macos-about-copyright">Copyright 2026 Jazztinn. Pipo is an unofficial student utility.</p>
       </section>
     </div>

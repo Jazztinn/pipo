@@ -20,9 +20,13 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(runtime, /textContent/);
   assert.match(runtime, /mode === 'demo'/);
   const fixture = JSON.parse(await readFile(resolve(root, "public/pipo-menu/demo-fixture.json"), "utf8"));
-  assert.equal(fixture.studentName, "Totoy");
-  assert.ok(fixture.courses.length >= 3);
-  assert.ok(fixture.nextUp.length && fixture.messages.length && fixture.gradeFeedback.length);
+  assert.equal(fixture.studentName, "Samwise");
+  assert.ok(fixture.courses.length >= 6);
+  for (const section of ["nextUp", "schedule", "dueSoon", "newAssignments", "notifications", "messages", "gradeFeedback", "announcements", "resources"]) {
+    assert.ok(fixture[section].length, `${section} needs demo content`);
+  }
+  assert.ok(fixture.courses.every(course => course.id && course.name && course.shortName));
+  assert.ok(fixture.localState.pinnedCourseIDs.length && fixture.localState.hiddenCourseIDs.length);
   assert.doesNotMatch(runtime, /innerHTML/);
   assert.match(runtime, /addEventListener\('pipo-state'/);
   assert.match(runtime, /addEventListener\('pipo-response'/);
@@ -32,6 +36,9 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(runtime, /switchTab\(state\.selectedTab \|\| 'today', false\)/);
   assert.match(runtime, /refreshMinutes/);
   assert.match(runtime, /requestCalendarAccess/);
+  assert.doesNotMatch(runtime, /\$\{action\} complete/);
+  assert.match(runtime, /source === 'inspector'/);
+  assert.match(runtime, /actionButton\.closest\('#inspector-panel'\)/);
   for (const action of ["loadCourse", "updateSettings", "updateChannel"]) assert.match(runtime, new RegExp(action));
   assert.match(runtime, /shortName/);
   assert.match(runtime, /timestamp/);

@@ -41,10 +41,10 @@ struct PipoApp: App {
                 PipoDashboardRanking.urgentCount(snapshot: $0, state: model.localState)
             } ?? 0
             if count > 0 {
-                Label("\(count)", systemImage: "flag.fill")
+                Label("\(count)", systemImage: "flag")
                     .accessibilityLabel("Pipo, \(count) urgent items")
             } else {
-                Image(systemName: "flag.fill")
+                Image(systemName: "flag")
                     .accessibilityLabel("Pipo")
             }
         }

@@ -1,21 +1,86 @@
 {
-  "revision": 1,
+  "revision": 2,
   "phase": "ready",
   "title": "Today",
-  "studentName": "Totoy",
+  "studentName": "Samwise",
   "generatedAt": "2026-08-25T09:00:00Z",
-  "nextUp": [{ "id": "next-1", "title": "Activity 1 - Patronus Practice", "courseName": "HOGW01 - Defense Against the Dark Arts", "due": "3 days, 1 hr", "body": "Practice summoning a corporeal Patronus and submit reflection." }],
-  "schedule": [{ "id": "schedule-1", "title": "Lecture: Multi-variable Summation", "courseName": "MATH02 - Advanced Arithmancy", "date": "Today · 2:00 PM", "body": "Room 4B. Bring your annotated notes." }],
-  "dueSoon": [{ "id": "due-1", "title": "Essay: The Ethics of Magic", "courseName": "ETHC01 - Ethics of Magic", "due": "Tomorrow · 11:59 PM", "body": "Draft saved in LMS. Final submission due tomorrow." }],
-  "messages": [{ "id": "message-1", "title": "Professor McGonagall", "courseName": "MATH02", "body": "Your revised proof looks strong. Please include one more worked example." }],
-  "gradeFeedback": [{ "id": "grade-1", "title": "Quiz 2 published", "courseName": "MATH02 - Advanced Arithmancy", "body": "Grade: 98/100\nFeedback: Excellent work on expanding multi-variable summation notation." }],
-  "announcements": [{ "id": "announcement-1", "title": "Library hours extended", "courseName": "LPU Cavite LMS", "body": "Library stays open until 10 PM during examination week." }],
-  "resources": [{ "id": "resource-1", "title": "Week 4 reading pack", "courseName": "HOGW01", "body": "Required reading and lecture slides are available in the LMS." }],
-  "courses": [
-    { "id": "course-hogw01", "title": "HOGW01 - Defense Against the Dark Arts", "courseCode": "HOGW-HOGW01", "subtitle": "Hogwarts Term 1", "body": "Professor Dumbledore · 4 activities" },
-    { "id": "course-math02", "title": "MATH02 - Advanced Arithmancy", "courseCode": "MATH-MATH02", "subtitle": "Hogwarts Term 1", "body": "Professor McGonagall · 7 activities" },
-    { "id": "course-ethc01", "title": "ETHC01 - Ethics of Magic", "courseCode": "ETHC-ETHC01", "subtitle": "Hogwarts Term 1", "body": "Professor Gandalf · 3 activities" }
+  "selectedTab": "today",
+  "nextUp": [
+    { "id": "next-patronus", "courseID": "course-hogwarts", "title": "Patronus field practicum", "courseName": "DADA 401 · Remedial Defense", "due": "In 1 hr", "body": "Produce a corporeal Patronus. Professor Lupin accepts otters, stags, and unusually brave house cats." },
+    { "id": "next-ring", "courseID": "course-middle-earth", "title": "Ring custody risk assessment", "courseName": "MORD 301 · Applied Quest Logistics", "due": "Today · 4:30 PM", "body": "Assess chain-of-custody failures from Bag End to Mount Doom. Eagles may appear only in the appendix." },
+    { "id": "next-burnbook", "courseID": "course-north-shore", "title": "Burn Book media ethics brief", "courseName": "PLST 200 · Plastics and Power", "due": "Tomorrow", "body": "Analyze rumor networks at North Shore High. Anonymous hallway gossip needs corroboration." }
   ],
-  "settings": { "notifications": true, "reminders": true },
-  "supported": { "nextUp": true, "schedule": true, "messages": true, "courses": true }
+  "schedule": [
+    { "id": "schedule-council", "courseID": "course-middle-earth", "title": "Council of Elrond group project", "courseName": "MORD 301 · Applied Quest Logistics", "date": "Today · 2:00 PM", "body": "Rivendell seminar room. Bring one practical plan and zero cursed jewelry." },
+    { "id": "schedule-small-council", "courseID": "course-westeros", "title": "Small Council simulation", "courseName": "WST 410 · Governance of Westeros", "date": "Today · 6:00 PM", "body": "Model a peaceful succession. Extra credit if the treasury survives the meeting." },
+    { "id": "schedule-sincerely", "courseID": "course-murphy", "title": "Workshop: Sincerely, Me", "courseName": "MUR 214 · Digital Identity and Letters", "date": "Friday · 10:30 AM", "body": "Peer workshop on voice, authorship, and why fabricated email chains create ethical problems." }
+  ],
+  "dueSoon": [
+    { "id": "due-red-wedding", "courseID": "course-westeros", "title": "Case study: The Red Wedding", "courseName": "WST 410 · Governance of Westeros", "due": "Tonight · 11:59 PM", "body": "Evaluate guest right, alliance design, and catastrophic event planning. Citation style: Maester." },
+    { "id": "due-map", "courseID": "course-middle-earth", "title": "Annotate the road to Mordor", "courseName": "MORD 301 · Applied Quest Logistics", "due": "Tomorrow · 8:00 AM", "body": "Mark supply stops, spider exposure, and every place where the group should have listened to Sam." }
+  ],
+  "newAssignments": [
+    { "id": "assignment-fetch", "courseID": "course-north-shore", "title": "Stop trying to make fetch happen", "courseName": "PLST 200 · Plastics and Power", "due": "Monday · 9:00 AM", "body": "New assignment: write a 600-word memo on failed language diffusion and social authority." }
+  ],
+  "notifications": [
+    { "id": "notification-snape", "courseID": "course-hogwarts", "title": "Potion rubric updated", "courseName": "DADA 401 · Remedial Defense", "timestamp": "8 min ago", "body": "Professor Snape added a deduction for reckless wand-waving near simmering cauldrons." },
+    { "id": "notification-throne", "courseID": "course-westeros", "title": "Lecture hall moved", "courseName": "WST 410 · Governance of Westeros", "timestamp": "24 min ago", "body": "Tonight's lecture moved from the Iron Throne room to a venue with fewer swords." }
+  ],
+  "messages": [
+    { "id": "message-gandalf", "courseID": "course-middle-earth", "title": "Gandalf the Grey", "courseName": "MORD 301", "timestamp": "12 min ago", "body": "Your route is sound. Budget extra time for riddles in the dark and second breakfast." },
+    { "id": "message-regina", "courseID": "course-north-shore", "title": "Regina George", "courseName": "PLST 200", "timestamp": "Yesterday", "body": "Can you send the notes? The dress code taxonomy is more complicated than expected." },
+    { "id": "message-connor", "courseID": "course-murphy", "title": "Connor Murphy", "courseName": "MUR 214", "timestamp": "Yesterday", "body": "Please verify the source before quoting the letter archive. Context matters." }
+  ],
+  "gradeFeedback": [
+    { "id": "grade-herbology", "courseID": "course-hogwarts", "title": "Mandrake handling practical published", "courseName": "DADA 401 · Remedial Defense", "date": "Today", "body": "Grade: 94/100\nFeedback: Strong earmuff protocol. Repotting technique needs less dramatic screaming." },
+    { "id": "grade-hand", "courseID": "course-westeros", "title": "Hand of the King memo graded", "courseName": "WST 410 · Governance of Westeros", "date": "Yesterday", "body": "Grade: 88/100\nFeedback: Excellent political analysis. Recommendation to trust Littlefinger requires revision." },
+    { "id": "grade-map", "courseID": "course-murphy", "title": "You Will Be Found network map", "courseName": "MUR 214 · Digital Identity and Letters", "date": "Monday", "body": "Grade: 97/100\nFeedback: Clear map of amplification, audience, and unintended reach." }
+  ],
+  "announcements": [
+    { "id": "announcement-owl", "courseID": "course-hogwarts", "title": "Owl post delayed", "courseName": "Hogwarts LMS", "date": "Today", "body": "Storms over the Forbidden Forest may delay physical submissions. LMS deadlines remain unchanged." },
+    { "id": "announcement-winter", "courseID": "course-westeros", "title": "Winter is, academically, coming", "courseName": "Citadel Registrar", "date": "Yesterday", "body": "Finals timetable posted. Students beyond the Wall should download readings for offline use." }
+  ],
+  "resources": [
+    { "id": "resource-prophecy", "courseID": "course-hogwarts", "title": "Restricted Section reading pack", "courseName": "DADA 401", "body": "Defensive spell notes, prophecy metadata, and a librarian-approved guide to returning books on time." },
+    { "id": "resource-family-tree", "courseID": "course-westeros", "title": "Targaryen family tree, annotated", "courseName": "WST 410", "body": "High-resolution lineage chart with disputed claims, dragons, and a necessary zoom control." },
+    { "id": "resource-pink", "courseID": "course-north-shore", "title": "Wednesday color theory slides", "courseName": "PLST 200", "body": "Seminar deck on dress codes, group identity, and the semiotics of pink." }
+  ],
+  "courses": [
+    { "id": "course-hogwarts", "name": "DADA 401 · Remedial Defense", "shortName": "DADA 401", "courseCode": "HOGW-DADA401", "subtitle": "Hogwarts · Autumn term", "body": "Professor Lupin · 5 upcoming activities", "publishedTotal": "94%", "upcomingCount": 5 },
+    { "id": "course-middle-earth", "name": "MORD 301 · Applied Quest Logistics", "shortName": "MORD 301", "courseCode": "ME-MORD301", "subtitle": "Rivendell Extension · Third Age", "body": "Gandalf the Grey · 4 upcoming activities", "publishedTotal": "91%", "upcomingCount": 4 },
+    { "id": "course-westeros", "name": "WST 410 · Governance of Westeros", "shortName": "WST 410", "courseCode": "CITA-WST410", "subtitle": "The Citadel · Long summer term", "body": "Maester Aemon · 6 upcoming activities", "publishedTotal": "88%", "upcomingCount": 6 },
+    { "id": "course-north-shore", "name": "PLST 200 · Plastics and Power", "shortName": "PLST 200", "courseCode": "NSH-PLST200", "subtitle": "North Shore High · Fall semester", "body": "Ms. Norbury · 3 upcoming activities", "publishedTotal": "96%", "upcomingCount": 3 },
+    { "id": "course-murphy", "name": "MUR 214 · Digital Identity and Letters", "shortName": "MUR 214", "courseCode": "DEH-MUR214", "subtitle": "Murphy Institute · Fall semester", "body": "Dr. Hansen · 2 upcoming activities", "publishedTotal": "97%", "upcomingCount": 2 },
+    { "id": "course-elective", "name": "MYTH 101 · Swords, Songs, and Subtext", "shortName": "MYTH 101", "courseCode": "CROSS-MYTH101", "subtitle": "Cross-realm elective", "body": "Guest faculty · No upcoming work", "upcomingCount": 0 }
+  ],
+  "settings": {
+    "notificationsEnabled": true,
+    "reminderDayBefore": true,
+    "reminderHourBefore": true,
+    "assignmentNotifications": true,
+    "announcementNotifications": true,
+    "messageNotifications": true,
+    "gradeNotifications": true,
+    "refreshMinutes": 15
+  },
+  "localState": {
+    "pinnedCourseIDs": ["course-hogwarts", "course-middle-earth"],
+    "hiddenCourseIDs": ["course-elective"]
+  },
+  "calendarStatus": "authorized",
+  "secureStorageStatus": "available",
+  "updateChannel": "stable",
+  "appVersion": "0.4.1",
+  "capabilities": { "calendar": true, "updates": true, "diagnostics": true },
+  "supported": {
+    "nextUp": true,
+    "schedule": true,
+    "due_soon": true,
+    "notifications": true,
+    "messages": true,
+    "grades": true,
+    "announcements": true,
+    "resources": true,
+    "courses": true
+  }
 }
