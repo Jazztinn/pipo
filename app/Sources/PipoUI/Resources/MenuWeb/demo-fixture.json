@@ -70,7 +70,7 @@
   "calendarStatus": "authorized",
   "secureStorageStatus": "available",
   "updateChannel": "stable",
-  "appVersion": "0.4.3",
+  "appVersion": "0.4.4",
   "capabilities": { "calendar": true, "updates": true, "diagnostics": true },
   "supported": {
     "nextUp": true,

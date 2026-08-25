@@ -200,6 +200,9 @@ struct PipoWebMenuView: NSViewRepresentable {
 
         func observeWindow(of view: WKWebView) {
             guard hostMode == .menuBar, windowObserver == nil, let window = view.window else { return }
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = false
             windowObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self, weak view] _ in
                 guard let self, let view else { return }
                 Task { @MainActor in
@@ -291,7 +294,9 @@ struct PipoWebMenuView: NSViewRepresentable {
                 case "checkForUpdates": guard let action = configuration.installUpdate else { throw BridgeError.unsupported }; action()
                 case "exportDiagnostics": guard let action = configuration.exportDiagnostics else { throw BridgeError.unsupported }; action()
                 case "retrySecureStorage": _ = await model.retrySecureStorage()
-                case "setInspectorVisible": guard let visible = payload["visible"]?.boolValue else { throw BridgeError.invalid }; onInspectorVisibilityChanged(visible)
+                case "setInspectorVisible":
+                    guard let visible = payload["visible"]?.boolValue else { throw BridgeError.invalid }
+                    resizeMenuBarWindowForInspector(visible)
                 default: throw BridgeError.unsupported
                 }
                 pushState()
@@ -316,6 +321,26 @@ struct PipoWebMenuView: NSViewRepresentable {
             if let setting = payload["quietHoursStart"]?.intValue { value.quietHoursStart = min(max(setting, 0), 23) }
             if let setting = payload["quietHoursEnd"]?.intValue { value.quietHoursEnd = min(max(setting, 0), 23) }
             model.settings = value
+        }
+
+        private func resizeMenuBarWindowForInspector(_ visible: Bool) {
+            guard hostMode == .menuBar else {
+                onInspectorVisibilityChanged(visible)
+                return
+            }
+            let anchoredMaxX = webView?.window?.frame.maxX
+            onInspectorVisibilityChanged(visible)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window = self.webView?.window, let anchoredMaxX else { return }
+                let screenFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+                var frame = window.frame
+                frame.origin.x = anchoredMaxX - frame.width
+                if let screenFrame {
+                    frame.origin.x = min(max(frame.origin.x, screenFrame.minX), screenFrame.maxX - frame.width)
+                    frame.origin.y = min(max(frame.origin.y, screenFrame.minY), screenFrame.maxY - frame.height)
+                }
+                window.setFrame(frame, display: true)
+            }
         }
 
         private func validItem(_ payload: [String: JSONValue]) -> DashboardItem? {

@@ -14,7 +14,8 @@
   let courseFilter = 'all';
   let categoryFilter = 'all';
   const el = (tag, className, value) => { const node = document.createElement(tag); if (className) node.className = className; if (value != null) node.textContent = String(value); return node; };
-  const field = (value, fallback = '—') => value == null || value === '' ? fallback : value;
+  const meaningful = value => value != null && !['', '-', '—', 'null', 'undefined'].includes(String(value).trim().toLowerCase());
+  const field = (value, fallback = '—') => meaningful(value) ? value : fallback;
   const valueFor = (object, ...keys) => keys.map(key => object?.[key]).find(value => value != null && value !== '');
   const courseIDFor = item => valueFor(item, 'courseID', 'course_id');
   const courseNameFor = item => valueFor(item, 'courseName', 'course_name');
@@ -31,7 +32,8 @@
   const cardSecondary = (item, type) => {
     if (type !== 'course') return itemText(item) || itemDetail(item) || type[0].toUpperCase() + type.slice(1);
     const count = Number(valueFor(item, 'upcomingCount', 'upcoming_count')) || courseAssignments(item).length;
-    const metadata = [valueFor(item, 'shortName', 'short_name'), valueFor(item, 'publishedTotal', 'published_total') && `Grade ${valueFor(item, 'publishedTotal', 'published_total')}`, `${count} upcoming`].filter(Boolean);
+    const publishedTotal = valueFor(item, 'publishedTotal', 'published_total');
+    const metadata = [valueFor(item, 'shortName', 'short_name'), meaningful(publishedTotal) && `Grade ${publishedTotal}`, `${count} upcoming`].filter(Boolean);
     return metadata.join(' · ');
   };
   function request(action, payload = {}, source = 'main') {
@@ -127,8 +129,17 @@
     if (grades == null) { block.classList.add('hidden'); return; }
     block.classList.remove('hidden');
     const rows = (Array.isArray(grades) ? grades : []).map(grade => {
-      const row = el('div', 'w-full flex items-start justify-between gap-3 py-1.5 px-1 border-b border-white/5');
-      row.append(el('span', 'text-neutral-300 font-medium min-w-0', itemTitle(grade)), el('span', 'text-neutral-400 font-mono text-[11px] shrink-0', field(valueFor(grade, 'publishedGrade', 'published_grade'), 'Published')));
+      const row = el('article', 'mac-card rounded-xl p-2.5 space-y-1.5');
+      const heading = el('div', 'flex items-start justify-between gap-3');
+      const title = el('span', 'text-neutral-200 font-medium min-w-0 leading-snug', itemTitle(grade));
+      const publishedGrade = valueFor(grade, 'publishedGrade', 'published_grade');
+      const badge = el('span', 'rounded-md bg-rose-500/15 border border-rose-500/25 px-2 py-0.5 text-rose-300 font-mono text-[11px] shrink-0', field(publishedGrade, 'Published'));
+      heading.append(title, badge);
+      row.append(heading);
+      const feedback = valueFor(grade, 'feedback', 'excerpt');
+      if (meaningful(feedback)) row.append(el('p', 'text-[10px] text-neutral-400 leading-relaxed', feedback));
+      const timestamp = dateText(grade);
+      if (meaningful(timestamp)) row.append(el('div', 'text-[10px] text-neutral-500', timestamp));
       return row;
     });
     list.replaceChildren(...rows);
@@ -138,13 +149,8 @@
   function renderCourseDetail(detail) {
     const course = detail?.course || selectedItem || {};
     selectedItem = { ...course, destination: detail?.destination, courseID: course.id };
-    const lines = [];
-    const publishedTotal = valueFor(course, 'publishedTotal', 'published_total');
-    if (publishedTotal) lines.push(`Published grade: ${publishedTotal}`);
-    if (Array.isArray(detail?.assignments)) lines.push(`${detail.assignments.length} assignments`);
-    if (Array.isArray(detail?.grades)) lines.push(`${detail.grades.length} grade entries`);
-    if (Array.isArray(detail?.failures) && detail.failures.length) lines.push('Some course sections are unavailable.');
-    openItemInspector('course', { ...selectedItem, ...course, assignments: detail?.assignments || [], grades: detail?.grades || [], detail: lines.join('\n') }, true);
+    const warning = Array.isArray(detail?.failures) && detail.failures.length ? 'Some course sections are unavailable.' : '';
+    openItemInspector('course', { ...selectedItem, ...course, assignments: detail?.assignments || [], grades: detail?.grades || [], detail: warning }, true);
   }
   function closeInspectorSafe() { const inspector = document.getElementById('inspector-panel'); if (!inspector || inspector.classList.contains('hidden')) return; inspector.classList.add('hidden'); inspector.classList.remove('flex', 'inspector-enter'); request('setInspectorVisible', { visible: false }); }
   function itemCard(item, type) {
@@ -205,6 +211,7 @@
     if (courses) { const cards = (state.courses || []).map(course => itemCard(course, 'course')); courses.replaceChildren(...(cards.length ? cards : [el('div', 'mac-card rounded-xl p-3 text-xs text-neutral-400', 'No courses available') ])); }
     const phase = state.phase || 'ready';
     document.documentElement.dataset.phase = phase;
+    document.documentElement.dataset.hostMode = state.hostMode || (mode === 'demo' ? 'showcase' : 'menuBar');
     const statusText = phase === 'offline' ? 'Offline cache' : phase === 'loading' || phase === 'authenticating' ? 'Connecting' : phase === 'failed' ? 'Sync failed' : state.failures?.length ? 'Partial sync' : 'Ready';
     const sync = document.getElementById('sync-status'); if (sync) sync.textContent = statusText;
     const syncDot = document.getElementById('sync-dot'); if (syncDot) syncDot.dataset.phase = phase === 'ready' && state.failures?.length ? 'offline' : phase;

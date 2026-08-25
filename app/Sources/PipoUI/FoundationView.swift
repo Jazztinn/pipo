@@ -785,9 +785,7 @@ public struct PipoRootView: View {
                     hostMode: hostMode,
                     onSignOut: { isSignOutConfirmationPresented = true },
                     onInspectorVisibilityChanged: { visible in
-                        withAnimation(.easeOut(duration: 0.22)) {
-                            isInspectorVisible = visible
-                        }
+                        isInspectorVisible = visible
                     }
                 )
             }
@@ -805,7 +803,11 @@ public struct PipoRootView: View {
             case .onboarding, .loading, .failed:
                 PipoPalette.canvas
             default:
-                PipoHostMaterial()
+                if hostMode == .menuBar {
+                    Color.clear
+                } else {
+                    PipoHostMaterial()
+                }
             }
         }
         .confirmationDialog(

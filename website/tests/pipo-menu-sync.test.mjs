@@ -48,4 +48,6 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.doesNotMatch(runtime, /Untitled item|Details unavailable|Course details unavailable/);
   assert.match(html, /id="main-navigation"/);
   assert.match(html, /id="sync-button"[^>]+data-action="refresh"/);
+  assert.match(runtime, /mac-card rounded-xl p-2\.5 space-y-1\.5/);
+  assert.doesNotMatch(runtime, /Published grade:.*assignments.*grade entries/s);
 });
