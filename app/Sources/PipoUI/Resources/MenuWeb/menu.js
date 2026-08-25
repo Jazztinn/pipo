@@ -15,8 +15,25 @@
   let categoryFilter = 'all';
   const el = (tag, className, value) => { const node = document.createElement(tag); if (className) node.className = className; if (value != null) node.textContent = String(value); return node; };
   const field = (value, fallback = '—') => value == null || value === '' ? fallback : value;
-  const itemTitle = item => field(item?.title || item?.name || item?.shortName || item?.label, 'Untitled item');
-  const itemText = item => [item?.courseName, item?.subtitle, item?.timestamp || item?.date, item?.due].filter(Boolean).join(' · ');
+  const valueFor = (object, ...keys) => keys.map(key => object?.[key]).find(value => value != null && value !== '');
+  const courseIDFor = item => valueFor(item, 'courseID', 'course_id');
+  const courseNameFor = item => valueFor(item, 'courseName', 'course_name');
+  const itemTitle = item => field(valueFor(item, 'title', 'name', 'shortName', 'short_name', 'label'), 'LMS item');
+  const itemDetail = item => valueFor(item, 'body', 'detail', 'description', 'feedback', 'excerpt', 'message');
+  const dateText = item => valueFor(item, 'due', 'date', 'timestamp');
+  const itemText = item => [courseNameFor(item), valueFor(item, 'subtitle', 'courseCode', 'course_code'), dateText(item)].filter(Boolean).join(' · ');
+  const courseAssignments = course => {
+    const courseID = String(course?.id || courseIDFor(course) || '');
+    if (!courseID || !currentState) return [];
+    return [...(currentState.dueSoon || []), ...(currentState.newAssignments || [])]
+      .filter(item => String(courseIDFor(item) || '') === courseID);
+  };
+  const cardSecondary = (item, type) => {
+    if (type !== 'course') return itemText(item) || itemDetail(item) || type[0].toUpperCase() + type.slice(1);
+    const count = Number(valueFor(item, 'upcomingCount', 'upcoming_count')) || courseAssignments(item).length;
+    const metadata = [valueFor(item, 'shortName', 'short_name'), valueFor(item, 'publishedTotal', 'published_total') && `Grade ${valueFor(item, 'publishedTotal', 'published_total')}`, `${count} upcoming`].filter(Boolean);
+    return metadata.join(' · ');
+  };
   function request(action, payload = {}, source = 'main') {
     if (!allowed.has(action)) return null;
     if (action !== 'ui.ready' && action !== 'setInspectorVisible') {
@@ -27,7 +44,8 @@
     const outbound = { ...payload, requestID: generatedID, revision };
     const nativeID = nativeBridge?.request ? nativeBridge.request(action, outbound) : null;
     const requestID = typeof nativeID === 'string' && nativeID ? nativeID : generatedID;
-    requests.set(requestID, { action, payload: outbound, source });
+    const sourcePanel = source === 'inspector' ? document.getElementById('inspector-panel') : document.getElementById('main-panel');
+    requests.set(requestID, { action, payload: outbound, source: sourcePanel || source });
     const message = { action, payload: { ...outbound, requestID } };
     window.dispatchEvent(new CustomEvent('pipo:request', { detail: { requestID, ...message } }));
     if (mode === 'demo') window.setTimeout(() => resolveResponse({ requestID, success: true }), 80);
@@ -39,15 +57,20 @@
     if (pending?.action === 'loadCourse' && response.data) renderCourseDetail(response.data);
     const labels = { refresh: 'Pipo refreshed', refreshSection: 'Section refreshed', markSeen: 'Marked as seen', undoSeen: 'Restored as unseen', snooze: 'Snoozed for one hour', openDestination: 'Opened in LMS', copyDetails: 'Details copied', addToCalendar: 'Added to Calendar', requestCalendarAccess: 'Calendar access updated', pinCourse: 'Course pinned', unpinCourse: 'Course unpinned', hideCourse: 'Course hidden', restoreCourse: 'Course restored', updateSettings: 'Settings saved', updateChannel: 'Update channel saved', clearCache: 'Saved dashboard cleared', checkForUpdates: 'Update check started', exportDiagnostics: 'Diagnostics exported', retrySecureStorage: 'Secure storage checked' };
     if (response.success === false) showToast(response.error || 'Action failed', pending?.source);
-    else if (labels[pending?.action]) showToast(response.message || labels[pending.action], pending?.source);
+    else if (labels[pending?.action]) {
+      const message = String(response.message || '').trim();
+      const action = String(pending.action || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rawCompletion = new RegExp(`^${action}\\s+(?:complete|completed|success|successful)$`, 'i');
+      showToast(message && !rawCompletion.test(message) ? message : labels[pending.action], pending?.source);
+    }
   }
   if (!nativeBridge?.request) window.pipo = { version: 1, available: false, mode, request };
   else window.pipo = Object.freeze({ ...nativeBridge, mode, request });
   function showToast(message, source = 'main') {
     const toast = document.getElementById('toast'); const target = document.getElementById('toast-message'); if (!toast || !target) return;
     const inspector = document.getElementById('inspector-panel'); const shell = document.getElementById('pipo-shell');
-    const useInspector = source === 'inspector' && inspector && !inspector.classList.contains('hidden');
-    const panel = useInspector ? inspector : document.getElementById('main-panel');
+    const panel = source?.nodeType === 1 ? source : source === 'inspector' ? inspector : document.getElementById('main-panel');
+    const useInspector = panel === inspector;
     if (shell && toast.parentElement !== shell) shell.append(toast);
     if (panel) { toast.style.left = `${panel.offsetLeft + panel.offsetWidth / 2}px`; toast.style.top = `${panel.offsetTop + panel.offsetHeight - (useInspector ? 48 : 62)}px`; toast.style.bottom = 'auto'; }
     target.textContent = String(message); toast.classList.remove('opacity-0', 'translate-y-4'); toast.classList.add('opacity-100', 'translate-y-0');
@@ -57,28 +80,79 @@
     const inspector = document.getElementById('inspector-panel'); if (!inspector) return;
     selectedItem = item; selectedType = type;
     if (type === 'course' && mode === 'native' && !skipLoad) { request('loadCourse', { courseID: item?.id }); }
-    document.getElementById('inspector-category').textContent = type === 'course' ? 'Course' : type;
+    document.getElementById('inspector-category').textContent = type === 'course' ? 'Course' : type[0].toUpperCase() + type.slice(1);
     document.getElementById('inspector-title').textContent = itemTitle(item);
-    document.getElementById('inspector-subtitle').textContent = itemText(item) || field(item?.courseCode, 'Pipo');
-    const body = document.getElementById('inspector-body'); body.replaceChildren(el('div', 'text-neutral-200 leading-relaxed', field(item?.body || item?.detail || item?.description || item?.feedback, 'No additional details.')));
+    document.getElementById('inspector-subtitle').textContent = itemText(item) || (type === 'course' ? 'Course details' : 'LMS activity');
+    const body = document.getElementById('inspector-body');
+    const detail = itemDetail(item);
+    body.classList.toggle('hidden', !detail);
+    body.replaceChildren(...(detail ? [el('div', 'text-neutral-200 leading-relaxed', detail)] : []));
+    syncActivityDetails(type, item);
+    syncInspectorCourseData(type === 'course' ? item : null);
+    syncInspectorGrades(type === 'course' ? (item.grades || []) : null);
     const open = document.getElementById('inspector-open-label'); if (open) open.textContent = type === 'course' ? 'Open course in LMS' : 'Open item in LMS';
     inspector.classList.remove('hidden', 'inspector-exit'); inspector.classList.add('flex', 'inspector-enter'); request('setInspectorVisible', { visible: true, itemID: item?.id || null });
+  }
+  function syncActivityDetails(type, item) {
+    const block = document.getElementById('inspector-activity-details');
+    const isActivity = type !== 'course';
+    block?.classList.toggle('hidden', !isActivity);
+    if (!isActivity) return;
+    const values = {
+      'activity-course': courseNameFor(item) || 'Course not supplied',
+      'activity-instructor': valueFor(item, 'instructor') || 'Not supplied',
+      'activity-kind': valueFor(item, 'kind') || type,
+      'activity-due': dateText(item) || 'No date supplied'
+    };
+    Object.entries(values).forEach(([id, value]) => { const node = document.getElementById(id); if (node) node.textContent = value; });
+  }
+  function syncInspectorCourseData(course) {
+    const block = document.getElementById('inspector-assignments-block');
+    const list = block?.querySelector('[data-course-assignments]');
+    const empty = block?.querySelector('[data-course-assignments-empty]');
+    if (!block || !list || !empty) return;
+    block.classList.toggle('hidden', !course);
+    if (!course) return;
+    const courseID = String(course?.id || courseIDFor(course) || '');
+    const assignments = Array.isArray(course?.assignments) ? course.assignments : courseAssignments({ id: courseID });
+    list.replaceChildren(...assignments.map(item => itemCard(item, 'assignment')));
+    list.hidden = assignments.length === 0;
+    empty.classList.toggle('hidden', assignments.length !== 0);
+  }
+  function syncInspectorGrades(grades) {
+    const block = document.getElementById('inspector-grades-block');
+    const list = block?.querySelector('[data-course-grades]');
+    const empty = block?.querySelector('[data-course-grades-empty]');
+    if (!block || !list || !empty) return;
+    if (grades == null) { block.classList.add('hidden'); return; }
+    block.classList.remove('hidden');
+    const rows = (Array.isArray(grades) ? grades : []).map(grade => {
+      const row = el('div', 'w-full flex items-start justify-between gap-3 py-1.5 px-1 border-b border-white/5');
+      row.append(el('span', 'text-neutral-300 font-medium min-w-0', itemTitle(grade)), el('span', 'text-neutral-400 font-mono text-[11px] shrink-0', field(valueFor(grade, 'publishedGrade', 'published_grade'), 'Published')));
+      return row;
+    });
+    list.replaceChildren(...rows);
+    list.hidden = rows.length === 0;
+    empty.classList.toggle('hidden', rows.length !== 0);
   }
   function renderCourseDetail(detail) {
     const course = detail?.course || selectedItem || {};
     selectedItem = { ...course, destination: detail?.destination, courseID: course.id };
     const lines = [];
-    if (course.publishedTotal) lines.push(`Published grade: ${course.publishedTotal}`);
+    const publishedTotal = valueFor(course, 'publishedTotal', 'published_total');
+    if (publishedTotal) lines.push(`Published grade: ${publishedTotal}`);
     if (Array.isArray(detail?.assignments)) lines.push(`${detail.assignments.length} assignments`);
     if (Array.isArray(detail?.grades)) lines.push(`${detail.grades.length} grade entries`);
     if (Array.isArray(detail?.failures) && detail.failures.length) lines.push('Some course sections are unavailable.');
-    openItemInspector('course', { ...selectedItem, detail: lines.join('\n') || 'Course details are available in the LMS.' }, true);
+    openItemInspector('course', { ...selectedItem, ...course, assignments: detail?.assignments || [], grades: detail?.grades || [], detail: lines.join('\n') }, true);
   }
   function closeInspectorSafe() { const inspector = document.getElementById('inspector-panel'); if (!inspector || inspector.classList.contains('hidden')) return; inspector.classList.add('hidden'); inspector.classList.remove('flex', 'inspector-enter'); request('setInspectorVisible', { visible: false }); }
   function itemCard(item, type) {
     const card = el('article', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 cursor-pointer'); card.tabIndex = 0; card.dataset.itemId = item?.id || '';
-    card.dataset.course = String(item?.courseID || item?.courseName || item?.id || '').toLowerCase(); card.dataset.category = type;
-    card.append(el('div', 'font-medium text-neutral-200 truncate', itemTitle(item)), el('div', 'text-[10px] text-neutral-400 truncate mt-0.5', itemText(item) || field(item?.body, 'Details unavailable')));
+    card.dataset.course = String(courseIDFor(item) || courseNameFor(item) || item?.id || '').toLowerCase(); card.dataset.category = type;
+    const secondary = cardSecondary(item, type);
+    card.append(el('div', 'font-medium text-neutral-200 truncate', itemTitle(item)));
+    if (secondary) card.append(el('div', 'text-[10px] text-neutral-400 truncate mt-0.5', secondary));
     card.addEventListener('click', () => openItemInspector(type, item));
     card.addEventListener('contextmenu', event => { event.preventDefault(); selectedItem = item; selectedType = type; showContextMenu(event.clientX, event.clientY); });
     card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openItemInspector(type, item); } }); return card;
@@ -105,6 +179,10 @@
     else content.append(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-400', `No ${title.toLowerCase()}`));
     heading.addEventListener('click', () => { const collapsed = content.hidden = !content.hidden; heading.setAttribute('aria-expanded', String(!collapsed)); }); wrap.append(heading, content); return wrap;
   }
+  function uniqueItems(items) {
+    const seen = new Set();
+    return (items || []).filter(item => { const id = String(item?.id || `${itemTitle(item)}:${dateText(item) || ''}`); if (seen.has(id)) return false; seen.add(id); return true; });
+  }
   function renderState(state) {
     const today = document.getElementById('view-today'); const courses = document.getElementById('view-courses');
     if (today) {
@@ -116,7 +194,7 @@
       if (state.failures?.length) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections could not refresh.'));
       nodes.push(section('Up next', 'nextUp', state.nextUp, 'activity'));
       if (state.supported?.schedule !== false) nodes.push(section('Schedule', 'schedule', state.schedule, 'activity'));
-      if (state.supported?.due_soon !== false) nodes.push(section('Due soon', 'dueSoon', [...(state.dueSoon || []), ...(state.newAssignments || [])], 'assignment'));
+      if (state.supported?.due_soon !== false) nodes.push(section('Due soon', 'dueSoon', uniqueItems([...(state.dueSoon || []), ...(state.newAssignments || [])]), 'assignment'));
       if (state.supported?.notifications !== false) nodes.push(section('Notifications', 'notifications', state.notifications, 'notification'));
       if (state.supported?.messages !== false) nodes.push(section('Messages', 'messages', state.messages, 'message'));
       if (state.supported?.grades !== false) nodes.push(section('Grade feedback', 'gradeFeedback', state.gradeFeedback, 'grade'));
@@ -125,8 +203,12 @@
       today.replaceChildren(...nodes);
     }
     if (courses) { const cards = (state.courses || []).map(course => itemCard(course, 'course')); courses.replaceChildren(...(cards.length ? cards : [el('div', 'mac-card rounded-xl p-3 text-xs text-neutral-400', 'No courses available') ])); }
-    document.documentElement.dataset.phase = state.phase || 'ready';
-    const sync = document.getElementById('sync-status'); if (sync) sync.textContent = state.phase === 'offline' ? 'Offline cache' : state.phase === 'loading' || state.phase === 'authenticating' ? 'Connecting' : state.failures?.length ? 'Partial sync' : 'Ready';
+    const phase = state.phase || 'ready';
+    document.documentElement.dataset.phase = phase;
+    const statusText = phase === 'offline' ? 'Offline cache' : phase === 'loading' || phase === 'authenticating' ? 'Connecting' : phase === 'failed' ? 'Sync failed' : state.failures?.length ? 'Partial sync' : 'Ready';
+    const sync = document.getElementById('sync-status'); if (sync) sync.textContent = statusText;
+    const syncDot = document.getElementById('sync-dot'); if (syncDot) syncDot.dataset.phase = phase === 'ready' && state.failures?.length ? 'offline' : phase;
+    const syncButton = document.getElementById('sync-button'); if (syncButton) { syncButton.setAttribute('aria-label', `${statusText}. Refresh Pipo`); syncButton.setAttribute('aria-busy', String(phase === 'loading' || phase === 'authenticating')); }
     syncSettings(state); syncCourseFilters(state); syncLocalCourses(state); applyFilters();
   }
   function syncLocalCourses(state) {
@@ -141,7 +223,7 @@
   function syncCourseFilters(state) {
     const current = document.querySelector('.course-filter-btn')?.parentElement; if (!current) return;
     const all = el('button', 'course-filter-btn w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 text-[11px] truncate', 'All Courses'); all.dataset.courseFilter = 'all';
-    const buttons = [all, ...(state.courses || []).map(course => { const button = el('button', 'course-filter-btn w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-neutral-300 text-[11px] truncate', course.shortName || course.name); button.dataset.courseFilter = String(course.id).toLowerCase(); return button; })];
+    const buttons = [all, ...(state.courses || []).map(course => { const button = el('button', 'course-filter-btn w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-neutral-300 text-[11px] truncate', valueFor(course, 'shortName', 'short_name', 'name')); button.dataset.courseFilter = String(course.id).toLowerCase(); return button; })];
     current.replaceChildren(...buttons); buttons.forEach(button => button.addEventListener('click', () => { courseFilter = button.dataset.courseFilter; applyFilters(); document.getElementById('filter-popover')?.classList.add('hidden'); }));
   }
   function syncSettings(state) {
@@ -154,7 +236,7 @@
   async function loadDemoFixture() { try { const response = await fetch('./demo-fixture.json', { cache: 'no-store' }); if (!response.ok) throw new Error(`fixture ${response.status}`); applyState(await response.json()); } catch (error) { showToast('Demo data unavailable'); window.dispatchEvent(new CustomEvent('pipo:error', { detail: error })); } }
   function applyFilters() { const query = String(document.getElementById('search-input')?.value || '').trim().toLowerCase(); document.querySelectorAll('#view-today [data-item-id], #view-courses [data-item-id]').forEach(card => { const searchMatch = !query || card.textContent.toLowerCase().includes(query); const courseMatch = courseFilter === 'all' || card.dataset.course === courseFilter; const categoryMatch = categoryFilter === 'all' || card.dataset.category === categoryFilter; card.hidden = !(searchMatch && courseMatch && categoryMatch); }); }
   function filterCards(query) { const input = document.getElementById('search-input'); if (input && input.value !== String(query || '')) input.value = String(query || ''); applyFilters(); }
-  function switchTab(tab, notify = true) { const valid = ['today', 'courses', 'settings'].includes(tab) ? tab : 'today'; ['today', 'courses', 'settings'].forEach(name => { document.getElementById(`view-${name}`)?.classList.toggle('hidden', name !== valid); document.getElementById(`tab-${name}`)?.classList.toggle('active', name === valid); }); const title = document.getElementById('header-title'); if (title) title.textContent = valid[0].toUpperCase() + valid.slice(1); const search = document.getElementById('search-section'); if (search) search.classList.toggle('hidden', valid === 'settings'); if (notify) request('selectTab', { tab: valid }); }
+  function switchTab(tab, notify = true) { const valid = ['today', 'courses', 'settings'].includes(tab) ? tab : 'today'; ['today', 'courses', 'settings'].forEach(name => { document.getElementById(`view-${name}`)?.classList.toggle('hidden', name !== valid); const button = document.getElementById(`tab-${name}`); button?.classList.toggle('active', name === valid); button?.setAttribute('aria-current', name === valid ? 'page' : 'false'); }); const title = document.getElementById('header-title'); if (title) title.textContent = valid[0].toUpperCase() + valid.slice(1); const search = document.getElementById('search-section'); if (search) search.classList.toggle('hidden', valid === 'settings'); const input = document.getElementById('search-input'); if (input) input.placeholder = valid === 'courses' ? 'Search courses' : 'Search today'; if (notify) request('selectTab', { tab: valid }); }
   function bindActions() {
     const tabNames = ['today', 'courses', 'settings'];
     tabNames.forEach(tab => { const node = document.getElementById(`tab-${tab}`); if (node) node.addEventListener('click', () => switchTab(tab)); });
@@ -164,7 +246,7 @@
       if (label.includes('open lms in browser')) node.dataset.lmsRoot = 'true';
       if (action) node.dataset.action = action;
     });
-    document.querySelectorAll('[id^="section-"] > button').forEach(heading => {
+    document.querySelectorAll('[id^="section-"] > button, [data-collapse-target]').forEach(heading => {
       const content = heading.nextElementSibling; if (!content) return; heading.setAttribute('aria-expanded', 'true'); heading.addEventListener('click', () => { content.hidden = !content.hidden; heading.setAttribute('aria-expanded', String(!content.hidden)); });
     });
     document.getElementById('search-input')?.addEventListener('input', applyFilters);

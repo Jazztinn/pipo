@@ -136,6 +136,19 @@ import Testing
     #expect(result.courses.first?.publishedTotal == "1.25")
 }
 
+@Test func refreshShowsPrivateDetailButCachesOnlyPrivacyProjection() async throws {
+    let message = DashboardItem(id: "message", kind: "message", title: "Professor", courseName: "Messages", detail: "Private reply")
+    let refreshed = DashboardSnapshot(generatedAt: "new", siteName: "LPU", studentName: "Alex", sections: DashboardSections(messages: [message]), courses: [])
+    let cache = InMemoryDashboardCache()
+    let coordinator = DashboardRefreshCoordinator(transport: SnapshotTransport(snapshot: refreshed), cache: cache)
+
+    let visible = try await coordinator.refresh(token: "token", force: true)
+    let cached = await cache.load()
+
+    #expect(visible.sections.messages.first?.detail == "Private reply")
+    #expect(cached?.sections.messages.first?.detail == nil)
+}
+
 @Test func rejectsExternalDestination() throws {
     #expect(throws: PipoCoreError.originRejected) { try DestinationPolicy.resolve("https://example.edu/login") }
     let destination = try DestinationPolicy.resolve("/course/view.php?id=12")

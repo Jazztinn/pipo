@@ -41,5 +41,11 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(runtime, /actionButton\.closest\('#inspector-panel'\)/);
   for (const action of ["loadCourse", "updateSettings", "updateChannel"]) assert.match(runtime, new RegExp(action));
   assert.match(runtime, /shortName/);
+  assert.match(runtime, /short_name/);
+  assert.match(runtime, /course_name/);
+  assert.match(runtime, /published_grade/);
   assert.match(runtime, /timestamp/);
+  assert.doesNotMatch(runtime, /Untitled item|Details unavailable|Course details unavailable/);
+  assert.match(html, /id="main-navigation"/);
+  assert.match(html, /id="sync-button"[^>]+data-action="refresh"/);
 });

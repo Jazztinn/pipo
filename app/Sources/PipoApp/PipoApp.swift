@@ -26,6 +26,7 @@ struct PipoApp: App {
             }
         }
         .defaultSize(width: 800, height: 680)
+        .windowResizability(.contentSize)
 
         MenuBarExtra {
             PipoRootView(

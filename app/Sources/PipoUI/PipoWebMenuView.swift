@@ -16,6 +16,7 @@ struct PipoWebMenuStateV1: Codable, Sendable {
     let generatedAt: String?
     let refreshDate: String?
     let selectedTab: String
+    let hostMode: PipoWebMenuHostMode
     let nextUp, schedule, dueSoon, newAssignments, notifications, messages, gradeFeedback, announcements, resources: [DashboardItem]
     let courses: [Course]
     let failures: [String]
@@ -164,12 +165,14 @@ struct PipoWebMenuView: NSViewRepresentable {
         private var revision = 0
         private var ready = false
         private var isClosed = false
+        private var selectedTab: String
         private var windowObserver: NSObjectProtocol?
 
         init(model: PipoModel, configuration: PipoUIConfiguration, hostMode: PipoWebMenuHostMode, onSignOut: @escaping () -> Void, onInspectorVisibilityChanged: @escaping (Bool) -> Void) {
             self.model = model
             self.configuration = configuration
             self.hostMode = hostMode
+            self.selectedTab = hostMode == .window ? "settings" : "today"
             self.onSignOut = onSignOut
             self.onInspectorVisibilityChanged = onInspectorVisibilityChanged
         }
@@ -201,6 +204,7 @@ struct PipoWebMenuView: NSViewRepresentable {
                 guard let self, let view else { return }
                 Task { @MainActor in
                     self.ready = false
+                    self.selectedTab = "today"
                     self.onInspectorVisibilityChanged(false)
                     self.loadMenu(in: view)
                 }
@@ -241,7 +245,7 @@ struct PipoWebMenuView: NSViewRepresentable {
                     await model.refresh(force: true, sections: [section])
                 case "selectTab":
                     guard let raw = payload["tab"]?.stringValue, let tab = PipoAppCore.PipoTab(rawValue: raw == "today" ? "dashboard" : raw) else { throw BridgeError.invalid }
-                    model.selectedTab = tab
+                    selectedTab = tab == .dashboard ? "today" : tab.rawValue
                 case "loadCourse":
                     guard let courseID = validCourseID(payload) else { throw BridgeError.invalid }
                     responseData = try Self.jsonValue(from: await model.loadCourse(id: courseID))
@@ -350,7 +354,8 @@ struct PipoWebMenuView: NSViewRepresentable {
                 studentName: snapshot?.studentName ?? "",
                 generatedAt: snapshot?.generatedAt,
                 refreshDate: model.refreshDate.map(ISO8601DateFormatter().string(from:)),
-                selectedTab: model.selectedTab == .dashboard ? "today" : model.selectedTab.rawValue,
+                selectedTab: selectedTab,
+                hostMode: hostMode,
                 nextUp: snapshot?.nextUp ?? [], schedule: snapshot?.schedule ?? [], dueSoon: snapshot?.sections.dueSoon ?? [],
                 newAssignments: snapshot?.sections.newAssignments ?? [], notifications: snapshot?.sections.notifications ?? [],
                 messages: snapshot?.sections.messages ?? [], gradeFeedback: snapshot?.sections.gradeFeedback ?? [],

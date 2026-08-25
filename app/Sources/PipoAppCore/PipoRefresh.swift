@@ -24,10 +24,12 @@ public actor DashboardRefreshCoordinator {
             }
             let response = try await transport.send(SidecarRequest(method: "refresh_dashboard", params: params))
             guard let result = response.result else { throw PipoCoreError.invalidResponse }
-            let decoded = try JSONDecoder().decode(DashboardSnapshot.self, from: result.encodedData()).privacyProjected()
+            // Keep private LMS detail in memory for the signed-in UI. Persist only the
+            // privacy projection so message bodies, feedback, and grades never enter cache.
+            let decoded = try JSONDecoder().decode(DashboardSnapshot.self, from: result.encodedData())
             let merged = previous.map { merge(cached: $0, refreshed: decoded, requested: sections) } ?? decoded
             let snapshot = merged.presentingNewAssignments(since: previous.map { Set($0.assignmentIDs) })
-            try await cache.save(snapshot)
+            try await cache.save(snapshot.privacyProjected())
             lastSuccessfulRefresh = Date()
             usedCachedResult = false
             return snapshot

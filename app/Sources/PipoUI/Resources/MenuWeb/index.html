@@ -138,6 +138,18 @@
       border-radius: 16px;
     }
 
+    #main-panel { min-height: 0; }
+    #main-panel > .view-panel { flex: 1 1 auto; min-height: 0; height: auto !important; overscroll-behavior: contain; }
+    #main-panel > .view-panel.hidden { display: none; }
+    #main-navigation { flex: 0 0 auto; position: relative; z-index: 30; padding: 8px 10px 12px; min-height: 58px; box-shadow: 0 -12px 28px rgba(12, 11, 15, .18); }
+    .mac-segmented-btn { min-height: 34px; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+    .mac-segmented-btn i { width: 12px; font-size: 10px; }
+    #sync-button { min-height: 24px; }
+    #sync-dot[data-phase="ready"] { background: #34d399; }
+    #sync-dot[data-phase="offline"] { background: #fbbf24; }
+    #sync-dot[data-phase="failed"] { background: #fb7185; }
+    #sync-dot[data-phase="loading"], #sync-dot[data-phase="authenticating"] { background: #60a5fa; }
+
     body > .relative > #inspector-panel {
       position: absolute;
       z-index: 80;
@@ -176,7 +188,7 @@
     /* Showcase host keeps canonical panes at reference geometry. */
     html.embedded, html.embedded body { width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0; overflow: hidden; background: transparent; }
     html.embedded body > .relative { position: fixed; top: 8px; right: 8px; width: 736px; height: auto; margin: 0; display: flex; align-items: flex-start; justify-content: flex-end; gap: 16px; transform: scale(1.27); transform-origin: top right; }
-    html.embedded body > .relative > .mac-window.w-\[380px\] { width: 380px; height: auto; max-width: 380px; flex: 0 0 380px; }
+    html.embedded body > .relative > .mac-window.w-\[380px\] { width: 380px; height: 580px; max-width: 380px; flex: 0 0 380px; }
     html.embedded body > .relative > #inspector-panel { width: 340px; max-width: 340px; max-height: 580px; flex: 0 0 340px; }
 
     .inspector-enter {
@@ -186,6 +198,19 @@
     .inspector-exit {
       animation: inspector-panel-out 180ms cubic-bezier(.4, 0, 1, 1) both;
       pointer-events: none;
+    }
+
+    /* Keep inspector context visible while its detail content scrolls. */
+    #inspector-nav {
+      position: sticky;
+      top: -1px;
+      z-index: 5;
+      margin: -16px -16px 0;
+      padding: 16px 16px 10px;
+      background: rgba(23, 22, 28, 0.94);
+      border-radius: 16px 16px 0 0;
+      backdrop-filter: blur(24px) saturate(180%);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
     }
 
     .view-panel.panel-enter {
@@ -247,7 +272,7 @@
     <div id="inspector-panel" class="mac-window w-[340px] rounded-2xl p-4 hidden flex-col justify-between text-xs transition-all duration-300 animate-fade-in relative z-10 max-h-[580px] custom-scroll overflow-y-auto">
       <div class="space-y-4">
         <!-- Inspector Navigation Header -->
-        <div class="flex items-center justify-between border-b border-white/10 pb-2.5">
+        <div id="inspector-nav" class="flex items-center justify-between border-b border-white/10 pb-2.5">
           <button class="text-neutral-400 hover:text-white flex items-center gap-1 text-[11px] font-medium transition">
             <i class="fa-solid fa-chevron-left text-[9px]"></i>
             <span id="inspector-category">Course</span>
@@ -307,69 +332,33 @@
         </section>
 
         <!-- Assignments List in Inspector -->
-        <div id="inspector-assignments-block" class="space-y-2 pt-1">
-          <div class="flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs">
+        <div id="inspector-assignments-block" class="hidden space-y-2 pt-1">
+          <button type="button" data-collapse-target="assignments" aria-expanded="true" class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs">
             <span class="flex items-center gap-1.5">
               <i class="fa-regular fa-file-lines text-[11px]"></i>
               Assignments
             </span>
             <i class="fa-solid fa-chevron-up text-[10px] text-neutral-500"></i>
-          </div>
+          </button>
 
-          <div class="space-y-1.5" data-course-assignments="defense">
-            <!-- Assignment item 1 -->
-            <div class="mac-card rounded-lg p-2 flex items-center justify-between text-xs">
-              <div class="min-w-0 pr-2">
-                <div class="font-medium text-neutral-200 truncate flex items-center gap-1.5">
-                  <i class="fa-regular fa-file-lines text-rose-400 text-[11px]"></i>
-                  <span>No upcoming assignment</span>
-                </div>
-                <div class="text-[10px] text-neutral-400 truncate mt-0.5">Course details unavailable</div>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                <span class="text-[10px] text-neutral-500 font-mono">–</span>
-              </div>
-            </div>
-
-            <!-- Assignment item 2 -->
-            <div class="mac-card rounded-lg p-2 flex items-center justify-between text-xs">
-              <div class="min-w-0 pr-2">
-                <div class="font-medium text-neutral-200 truncate flex items-center gap-1.5">
-                  <i class="fa-regular fa-file-lines text-rose-400 text-[11px]"></i>
-                  <span>No upcoming quiz</span>
-                </div>
-                <div class="text-[10px] text-neutral-400 truncate mt-0.5">Course details unavailable</div>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                <span class="text-[10px] text-neutral-500 font-mono">–</span>
-              </div>
-            </div>
-          </div>
+          <div class="space-y-1.5" data-course-assignments></div>
           <div class="hidden mac-card rounded-lg p-2 text-xs text-neutral-400" data-course-assignments-empty>
             No upcoming assignments.
           </div>
         </div>
 
         <!-- Published Grades Block -->
-        <div id="inspector-grades-block" class="space-y-1.5 pt-2">
-          <div class="flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs">
+        <div id="inspector-grades-block" class="hidden space-y-1.5 pt-2">
+          <button type="button" data-collapse-target="grades" aria-expanded="true" class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs">
             <span class="flex items-center gap-1.5">
               <i class="fa-regular fa-circle-check text-[11px]"></i>
               Published grades
             </span>
             <i class="fa-solid fa-chevron-up text-[10px] text-neutral-500"></i>
-          </div>
+          </button>
 
-          <div class="space-y-1 text-xs">
-            <div class="flex items-center justify-between py-1 px-1 border-b border-white/5">
-              <span class="text-neutral-300 font-medium">No recent feedback</span>
-              <span class="text-neutral-500 font-mono text-[11px]">–</span>
-            </div>
-            <div class="flex items-center justify-between py-1 px-1">
-              <span class="text-neutral-300 font-medium">No grades available</span>
-              <span class="text-neutral-500 font-mono text-[11px]">–</span>
-            </div>
-          </div>
+          <div class="space-y-1 text-xs" data-course-grades></div>
+          <div class="hidden mac-card rounded-lg p-2 text-xs text-neutral-400" data-course-grades-empty>No published grades.</div>
         </div>
 
         <!-- Quick Actions Grid -->
@@ -405,8 +394,8 @@
       <div class="h-10 px-4 flex items-center justify-between border-b border-white/10 relative bg-white/[0.02]">
         <div class="w-12"></div> <!-- Spacer for optical balance -->
         <span id="header-title" class="text-[13px] font-semibold text-neutral-200 tracking-tight">Today</span>
-        <button type="button" class="flex items-center gap-1.5 text-[10px] text-neutral-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 hover:bg-white/10 transition">
-            <span class="w-1.5 h-1.5 rounded-full bg-neutral-400"></span>
+        <button id="sync-button" type="button" data-action="refresh" aria-label="Refresh Pipo. Current status: Ready" class="flex items-center gap-1.5 text-[10px] text-neutral-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 hover:bg-white/10 transition">
+            <span id="sync-dot" data-phase="ready" class="w-1.5 h-1.5 rounded-full bg-neutral-400"></span>
           <span id="sync-status">Ready</span>
         </button>
       </div>
@@ -704,7 +693,7 @@
             </div>
             <div class="flex items-center justify-between border-t border-white/5 pt-2">
               <span class="text-neutral-400">Version</span>
-              <span class="text-neutral-300 font-mono text-[11px]">0.4.2</span>
+              <span class="text-neutral-300 font-mono text-[11px]">0.4.3</span>
             </div>
           </div>
         </div>
@@ -734,25 +723,25 @@
       </div>
 
       <!-- APPLE-STYLE SEGMENTED NAVIGATION FOOTER -->
-      <div class="p-2.5 border-t border-white/10 bg-white/[0.02] flex justify-center backdrop-blur-md">
+      <nav id="main-navigation" aria-label="Primary" class="border-t border-white/10 bg-white/[0.02] flex justify-center backdrop-blur-md">
         <div class="mac-segmented p-0.5 rounded-xl flex items-center text-xs w-full max-w-[280px]">
           <button
             id="tab-today"
             class="mac-segmented-btn active flex-1 py-1.5 rounded-lg text-center transition">
-            Today
+            <i class="fa-regular fa-calendar-check" aria-hidden="true"></i><span>Today</span>
           </button>
           <button
             id="tab-courses"
             class="mac-segmented-btn flex-1 py-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 font-medium text-center transition">
-            Courses
+            <i class="fa-solid fa-book-open" aria-hidden="true"></i><span>Courses</span>
           </button>
           <button
             id="tab-settings"
             class="mac-segmented-btn flex-1 py-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 font-medium text-center transition">
-            Settings
+            <i class="fa-solid fa-gear" aria-hidden="true"></i><span>Settings</span>
           </button>
         </div>
-      </div>
+      </nav>
 
       <!-- TOAST NOTIFICATION -->
       <div id="toast" role="status" aria-live="polite" class="absolute bottom-[58px] left-1/2 -translate-x-1/2 mac-popover px-4 py-2 rounded-full text-xs font-medium text-white border border-white/20 shadow-2xl transition-all duration-300 opacity-0 translate-y-4 pointer-events-none z-50 flex items-center gap-2 whitespace-nowrap">

@@ -795,10 +795,10 @@ public struct PipoRootView: View {
         .frame(
             minWidth: hostMode == .window ? 736 : menuBarWidth,
             idealWidth: hostMode == .window ? 800 : menuBarWidth,
-            maxWidth: hostMode == .menuBar ? menuBarWidth : .infinity,
-            minHeight: hostMode == .window ? 660 : 660,
+            maxWidth: hostMode == .window ? 800 : menuBarWidth,
+            minHeight: 660,
             idealHeight: hostMode == .window ? 680 : 660,
-            maxHeight: .infinity
+            maxHeight: hostMode == .window ? 680 : 660
         )
         .background {
             switch visiblePhase {

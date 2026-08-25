@@ -537,13 +537,15 @@ impl MoodleClient {
             })
             .collect::<Vec<_>>();
 
+        let next_up = due_soon.iter().take(3).cloned().collect::<Vec<_>>();
+
         Ok(json!({
             "version": PROTOCOL_VERSION,
             "generated_at": rfc3339_now(),
             "site_name": site.get("sitename").and_then(Value::as_str).unwrap_or("LPU Cavite LMS"),
             "student_name": site.get("fullname").and_then(Value::as_str).unwrap_or(""),
             "sections": { "due_soon": due_soon, "notifications": notifications, "new_assignments": new_assignments, "messages": messages, "grade_feedback": grade_feedback },
-            "next_up": [],
+            "next_up": next_up,
             "schedule": schedule,
             "announcements": announcements,
             "resources": resources,
@@ -1210,7 +1212,10 @@ fn notification_item(notification: &Value) -> Value {
             .get("contextname")
             .cloned()
             .unwrap_or(Value::String("Course".to_owned())),
-        Value::Null,
+        notification
+            .get("timecreated")
+            .map(timestamp_value)
+            .unwrap_or(Value::Null),
         destination(notification),
     );
     let is_unread = notification
@@ -1226,17 +1231,45 @@ fn notification_item(notification: &Value) -> Value {
         .unwrap_or(true);
     if let Some(object) = result.as_object_mut() {
         object.insert("is_unread".to_owned(), Value::Bool(is_unread));
+        if let Some(detail) = notification
+            .get("smallmessage")
+            .or_else(|| notification.get("fullmessage"))
+            .or_else(|| notification.get("fullmessagehtml"))
+            .and_then(Value::as_str)
+            .and_then(plain_feedback)
+        {
+            object.insert("detail".to_owned(), Value::String(detail));
+        }
     }
     result
 }
 fn message_item(message: &Value) -> Value {
-    item(
+    let title = message
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| Value::String(value.to_owned()))
+        .or_else(|| {
+            message
+                .get("members")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|member| {
+                    !member
+                        .get("iscurrentuser")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .filter_map(|member| member.get("fullname").and_then(Value::as_str))
+                .find(|value| !value.trim().is_empty())
+                .map(|value| Value::String(value.to_owned()))
+        })
+        .unwrap_or_else(|| Value::String("Recent message".to_owned()));
+    let mut result = item(
         message.get("id").cloned().unwrap_or(Value::Null),
         "message",
-        message
-            .get("name")
-            .cloned()
-            .unwrap_or(Value::String("Recent message".to_owned())),
+        title,
         Value::Null,
         Value::String("Messages".to_owned()),
         message
@@ -1250,7 +1283,22 @@ fn message_item(message: &Value) -> Value {
                 .and_then(Value::as_i64)
                 .unwrap_or_default()
         ),
-    )
+    );
+    if let Some(detail) = message
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|items| items.last())
+        .and_then(|item| item.get("text").or_else(|| item.get("message")))
+        .or_else(|| message.get("lastmessage"))
+        .and_then(Value::as_str)
+        .and_then(plain_feedback)
+    {
+        result
+            .as_object_mut()
+            .expect("message object")
+            .insert("detail".to_owned(), Value::String(detail));
+    }
+    result
 }
 fn assignment_items(value: &Value) -> Vec<Value> {
     let mut items = Vec::new();
@@ -1440,7 +1488,23 @@ fn resource_items(value: &Value, course: &Value) -> Vec<Value> {
         .collect()
 }
 fn published_grade_items(value: &Value, course: &Value) -> Vec<Value> {
-    value.get("usergrades").and_then(Value::as_array).and_then(|items| items.first()).and_then(|grade| grade.get("gradeitems")).and_then(Value::as_array).into_iter().flatten().filter(|grade| grade.get("hidden").and_then(Value::as_i64).unwrap_or(0) == 0).map(|grade| json!({ "id": grade.get("id"), "kind": "grade", "title": grade.get("itemname").cloned().unwrap_or(Value::String("Published grade".to_owned())), "course_id": course.get("id"), "course_name": course.get("name"), "timestamp": grade.get("gradedategraded").map(timestamp_value).unwrap_or(Value::Null), "destination": "", "is_total": grade.get("itemtype").and_then(Value::as_str) == Some("course"), "published_total": grade.get("gradeformatted") })).collect()
+    value.get("usergrades").and_then(Value::as_array).and_then(|items| items.first()).and_then(|grade| grade.get("gradeitems")).and_then(Value::as_array).into_iter().flatten().filter(|grade| grade.get("hidden").and_then(Value::as_i64).unwrap_or(0) == 0).map(|grade| {
+        let published_grade = grade.get("gradeformatted").cloned().unwrap_or(Value::Null);
+        let feedback = grade.get("feedback").and_then(Value::as_str).and_then(plain_feedback);
+        json!({
+            "id": grade.get("id"),
+            "kind": "grade",
+            "title": grade.get("itemname").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).unwrap_or("Published grade"),
+            "course_id": course.get("id"),
+            "course_name": course.get("name"),
+            "timestamp": grade.get("gradedategraded").map(timestamp_value).unwrap_or(Value::Null),
+            "destination": "",
+            "detail": published_grade,
+            "excerpt": feedback,
+            "is_total": grade.get("itemtype").and_then(Value::as_str) == Some("course"),
+            "published_total": grade.get("gradeformatted")
+        })
+    }).collect()
 }
 fn course_grade_items(value: &Value, course: &Value) -> Vec<Value> {
     value
@@ -1587,6 +1651,49 @@ mod tests {
             "Clear argument and strong references."
         );
         assert!(grades.iter().all(|item| item["title"] != "Hidden activity"));
+    }
+    #[test]
+    fn dashboard_grades_keep_published_value_and_feedback() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/grades.json")).unwrap();
+        let course = json!({ "id": 12, "name": "Understanding the Self" });
+        let grades = published_grade_items(&fixture, &course);
+        assert_eq!(grades[0]["detail"], "1.50");
+        assert_eq!(
+            grades[0]["excerpt"],
+            "Clear argument and strong references."
+        );
+    }
+    #[test]
+    fn direct_message_uses_member_name_and_last_message() {
+        let message = json!({
+            "id": 44,
+            "name": null,
+            "timemodified": 1_787_600_000_i64,
+            "members": [
+                { "fullname": "Alex Student", "iscurrentuser": true },
+                { "fullname": "Professor McGonagall", "iscurrentuser": false }
+            ],
+            "messages": [{ "text": "Your Transfiguration paper was graded." }]
+        });
+        let item = message_item(&message);
+        assert_eq!(item["title"], "Professor McGonagall");
+        assert_eq!(item["detail"], "Your Transfiguration paper was graded.");
+        assert_eq!(item["destination"], "/message/index.php?conversationid=44");
+    }
+    #[test]
+    fn notification_keeps_timestamp_and_plain_detail() {
+        let notification = json!({
+            "id": 8,
+            "subject": "New feedback",
+            "timecreated": 1_787_600_000_i64,
+            "smallmessage": "<p>Open your grade report.</p>",
+            "read": 0
+        });
+        let item = notification_item(&notification);
+        assert_eq!(item["detail"], "Open your grade report.");
+        assert!(item["timestamp"].as_str().is_some());
+        assert_eq!(item["is_unread"], true);
     }
     #[test]
     fn dashboard_sections_allow_only_read_only_sections() {
