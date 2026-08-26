@@ -7,33 +7,36 @@ import SwiftUI
 @main
 struct PipoApp: App {
     @NSApplicationDelegateAdaptor(PipoAppDelegate.self) private var appDelegate
-    @State private var model = PipoModel.live()
-    private let updater = PipoUpdater()
 
     var body: some Scene {
-        Window("Pipo", id: "pipo") {
+        Window("Pipo Settings", id: "pipo") {
             PipoRootView(
-                model: model,
+                model: appDelegate.model,
                 configuration: PipoUIConfiguration(
-                    model: model,
-                    installUpdate: updater.isConfigured ? updater.checkForUpdates : nil
+                    model: appDelegate.model,
+                    installUpdate: appDelegate.installUpdate
                 ),
                 hostMode: .window
             )
-            .frame(minWidth: 736, idealWidth: 800, minHeight: 660, idealHeight: 680)
-            .onAppear {
-                appDelegate.configureMenuBar(
-                    model: model,
-                    installUpdate: updater.isConfigured ? updater.checkForUpdates : nil
-                )
-            }
-            .task {
-                await model.start()
-            }
+            .frame(minWidth: 680, idealWidth: 820, minHeight: 480, idealHeight: 600)
         }
-        .defaultSize(width: 800, height: 680)
-        .windowResizability(.contentSize)
+        .defaultSize(width: 820, height: 600)
+        .windowResizability(.contentMinSize)
+        .commands { PipoCommands() }
+    }
+}
 
+private struct PipoCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") {
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "pipo")
+            }
+            .keyboardShortcut(",", modifiers: .command)
+        }
     }
 }
 
@@ -77,16 +80,32 @@ extension Notification.Name {
     static let pipoUpdateChannelChanged = Notification.Name("com.jazztinn.pipo.update-channel-changed")
 }
 
+@MainActor
 final class PipoAppDelegate: NSObject, NSApplicationDelegate {
+    let model = PipoModel.live()
+    let updater = PipoUpdater()
     private var menuBarController: PipoMenuBarController?
+    private var didStartModel = false
+
+    var installUpdate: (@MainActor () -> Void)? {
+        updater.isConfigured ? updater.checkForUpdates : nil
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        menuBarController = PipoMenuBarController(model: model, installUpdate: installUpdate)
+        guard !didStartModel else { return }
+        didStartModel = true
+        Task { await model.start() }
     }
 
-    @MainActor
-    func configureMenuBar(model: PipoModel, installUpdate: (@MainActor () -> Void)?) {
-        guard menuBarController == nil else { return }
-        menuBarController = PipoMenuBarController(model: model, installUpdate: installUpdate)
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !flag else { return true }
+        if let window = sender.windows.first(where: { $0.title == "Pipo Settings" }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+        return true
     }
 }

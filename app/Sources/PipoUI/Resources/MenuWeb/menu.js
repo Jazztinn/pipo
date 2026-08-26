@@ -13,6 +13,7 @@
   let selectedType = null;
   let activeTab = 'today';
   let inspectorTrigger = null;
+  let inspectorCloseTimer = null;
   const tabState = {
     today: { query: '', courseFilter: 'all', categoryFilter: 'all' },
     courses: { query: '', courseFilter: 'all', categoryFilter: 'all' },
@@ -94,6 +95,7 @@
   }
   function openItemInspector(type, item, skipLoad = false, trigger = null) {
     const inspector = document.getElementById('inspector-panel'); if (!inspector) return;
+    window.clearTimeout(inspectorCloseTimer); inspectorCloseTimer = null; delete inspector.dataset.closing;
     if (trigger) inspectorTrigger = trigger;
     selectedItem = item; selectedType = type;
     if (type === 'course' && mode === 'native' && !skipLoad) { request('loadCourse', { courseID: item?.id }); }
@@ -175,7 +177,27 @@
     const warning = Array.isArray(detail?.failures) && detail.failures.length ? 'Some course sections are unavailable.' : '';
     openItemInspector('course', { ...selectedItem, ...course, assignments: detail?.assignments || [], grades: detail?.grades || [], detail: warning }, true);
   }
-  function closeInspectorSafe() { const inspector = document.getElementById('inspector-panel'); if (!inspector || inspector.classList.contains('hidden')) return false; inspector.classList.add('hidden'); inspector.classList.remove('flex', 'inspector-enter'); inspector.setAttribute('aria-hidden', 'true'); const main = document.getElementById('main-panel'); main?.removeAttribute('inert'); main?.removeAttribute('aria-hidden'); inspectorTrigger?.focus?.({ preventScroll: true }); inspectorTrigger = null; request('setInspectorVisible', { visible: false }); return true; }
+  function closeInspectorSafe() {
+    const inspector = document.getElementById('inspector-panel');
+    if (!inspector || inspector.classList.contains('hidden')) return false;
+    if (inspector.dataset.closing === 'true') return true;
+    inspector.dataset.closing = 'true';
+    inspector.classList.remove('inspector-enter');
+    inspector.classList.add('inspector-exit');
+    inspector.setAttribute('aria-hidden', 'true');
+    const delay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 180;
+    inspectorCloseTimer = window.setTimeout(() => {
+      inspector.classList.add('hidden');
+      inspector.classList.remove('flex', 'inspector-exit');
+      delete inspector.dataset.closing;
+      const main = document.getElementById('main-panel');
+      main?.removeAttribute('inert'); main?.removeAttribute('aria-hidden');
+      inspectorTrigger?.focus?.({ preventScroll: true }); inspectorTrigger = null;
+      request('setInspectorVisible', { visible: false });
+      inspectorCloseTimer = null;
+    }, delay);
+    return true;
+  }
   function syncInspectorModality() { const inspector = document.getElementById('inspector-panel'); const main = document.getElementById('main-panel'); const compactOpen = window.matchMedia('(max-width: 735px)').matches && inspector && !inspector.classList.contains('hidden'); if (compactOpen) { main?.setAttribute('inert', ''); main?.setAttribute('aria-hidden', 'true'); } else { main?.removeAttribute('inert'); main?.removeAttribute('aria-hidden'); } }
   function itemCard(item, type) {
     const card = el('article', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 cursor-pointer'); card.tabIndex = 0; card.setAttribute('role', 'button'); card.setAttribute('aria-label', `${itemTitle(item)}. ${cardSecondary(item, type)}`); card.dataset.itemId = item?.id || ''; card.dataset.entityKey = item?.entityKey || item?.id || '';

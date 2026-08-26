@@ -1,65 +1,55 @@
 import CoreGraphics
+import Foundation
 
 package enum PipoMenuPanelGeometry {
     package static let compactSize = CGSize(width: 420, height: 660)
     package static let expandedSize = CGSize(width: 760, height: 660)
-
-    // Expanded CSS geometry: 12pt outer inset, 340pt inspector, 16pt gap,
-    // then the canonical 380pt main pane.
-    private static let expandedMainMidX: CGFloat = 12 + 340 + 16 + 190
+    package static let rightInset: CGFloat = 8
+    package static let topGap: CGFloat = 6
+    package static let expansionThreshold: CGFloat = 776
+    package static let showDuration: TimeInterval = 0.22
+    package static let hideDuration: TimeInterval = 0.18
 
     package static func frame(
         anchoredTo statusItemFrame: CGRect,
         in visibleFrame: CGRect,
         inspectorVisible: Bool,
-        topGap: CGFloat = 6
+        topGap: CGFloat = topGap
     ) -> CGRect {
-        let compactHeight = min(compactSize.height, visibleFrame.height)
-        let compactFrame = clamp(
-            CGRect(
-                x: statusItemFrame.midX - compactSize.width / 2,
-                y: statusItemFrame.minY - topGap - compactHeight,
-                width: compactSize.width,
-                height: compactHeight
-            ),
-            to: visibleFrame
-        )
-        guard inspectorVisible,
-              let expandedFrame = expandedFrame(preservingMainFrom: compactFrame, in: visibleFrame)
-        else { return compactFrame }
-        return expandedFrame
+        let expanded = inspectorVisible && usesExpandedInspector(anchoredTo: statusItemFrame, in: visibleFrame, topGap: topGap)
+        let requested = expanded ? expandedSize : compactSize
+        let availableWidth = max(0, visibleFrame.width - rightInset * 2)
+        let availableHeight = max(0, visibleFrame.height - rightInset * 2)
+        let size = CGSize(width: min(requested.width, availableWidth), height: min(requested.height, availableHeight))
+        let rightX = visibleFrame.maxX - rightInset
+        let topY = min(statusItemFrame.minY, visibleFrame.maxY) - topGap
+        let originY = max(visibleFrame.minY + rightInset, topY - size.height)
+        return CGRect(x: rightX - size.width, y: originY, width: size.width, height: size.height)
     }
 
     package static func usesExpandedInspector(
         anchoredTo statusItemFrame: CGRect,
         in visibleFrame: CGRect,
-        topGap: CGFloat = 6
+        topGap: CGFloat = topGap
     ) -> Bool {
-        frame(
-            anchoredTo: statusItemFrame,
-            in: visibleFrame,
-            inspectorVisible: true,
-            topGap: topGap
-        ).width == expandedSize.width
+        _ = statusItemFrame
+        _ = topGap
+        return visibleFrame.width >= expansionThreshold
     }
 
-    private static func expandedFrame(preservingMainFrom compactFrame: CGRect, in visibleFrame: CGRect) -> CGRect? {
-        guard visibleFrame.width >= expandedSize.width else { return nil }
-        let height = min(expandedSize.height, visibleFrame.height)
-        let candidate = CGRect(
-            x: compactFrame.midX - expandedMainMidX,
-            y: compactFrame.maxY - height,
-            width: expandedSize.width,
-            height: height
+    package static func mainPaneFrame(in panelFrame: CGRect, inspectorVisible: Bool) -> CGRect {
+        let leadingInset: CGFloat = inspectorVisible ? 368 : 28
+        let trailingInset: CGFloat = 12
+        let available = max(0, panelFrame.width - leadingInset - trailingInset)
+        return CGRect(
+            x: panelFrame.minX + leadingInset,
+            y: panelFrame.minY,
+            width: min(380, available),
+            height: panelFrame.height
         )
-        guard candidate.minX >= visibleFrame.minX, candidate.maxX <= visibleFrame.maxX else { return nil }
-        return candidate
     }
 
-    private static func clamp(_ frame: CGRect, to visibleFrame: CGRect) -> CGRect {
-        var result = frame
-        result.origin.x = min(max(result.minX, visibleFrame.minX), visibleFrame.maxX - result.width)
-        result.origin.y = min(max(result.minY, visibleFrame.minY), visibleFrame.maxY - result.height)
-        return result
+    package static func offscreenRightFrame(from frame: CGRect, in visibleFrame: CGRect) -> CGRect {
+        CGRect(x: visibleFrame.maxX + rightInset, y: frame.minY, width: frame.width, height: frame.height)
     }
 }

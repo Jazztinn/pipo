@@ -744,6 +744,7 @@ public struct PipoRootView: View {
     @State private var selectedCourseID: String?
     @State private var isSignOutConfirmationPresented = false
     @State private var isInspectorVisible = false
+    @State private var isInspectorExpanded = false
 
     public init(
         model: PipoModel,
@@ -803,26 +804,34 @@ public struct PipoRootView: View {
                     onOpenURL: openURL
                 )
             default:
-                PipoWebMenuView(
-                    model: model,
-                    configuration: configuration,
-                    hostMode: hostMode,
-                    onSignOut: { isSignOutConfirmationPresented = true },
-                    onDismissMenu: onMenuDismiss,
-                    onInspectorVisibilityChanged: { visible in
-                        isInspectorVisible = visible
-                        _ = onMenuInspectorVisibilityChanged(visible)
-                    }
-                )
+                if hostMode == .window {
+                    PipoSettingsCenterView(
+                        model: model,
+                        configuration: configuration,
+                        onSignOut: { isSignOutConfirmationPresented = true }
+                    )
+                } else {
+                    PipoWebMenuView(
+                        model: model,
+                        configuration: configuration,
+                        hostMode: hostMode,
+                        onSignOut: { isSignOutConfirmationPresented = true },
+                        onDismissMenu: onMenuDismiss,
+                        onInspectorVisibilityChanged: { visible in
+                            isInspectorVisible = visible
+                            isInspectorExpanded = onMenuInspectorVisibilityChanged(visible)
+                        }
+                    )
+                }
             }
         }
         .frame(
-            minWidth: hostMode == .window ? 736 : menuBarWidth,
-            idealWidth: hostMode == .window ? 800 : menuBarWidth,
-            maxWidth: hostMode == .window ? 800 : menuBarWidth,
-            minHeight: 660,
-            idealHeight: hostMode == .window ? 680 : 660,
-            maxHeight: hostMode == .window ? 680 : 660
+            minWidth: hostMode == .window ? 680 : menuBarWidth,
+            idealWidth: hostMode == .window ? 820 : menuBarWidth,
+            maxWidth: hostMode == .window ? .infinity : menuBarWidth,
+            minHeight: hostMode == .window ? 480 : 660,
+            idealHeight: hostMode == .window ? 600 : 660,
+            maxHeight: hostMode == .window ? .infinity : 660
         )
         .background {
             switch visiblePhase {
@@ -913,7 +922,7 @@ public struct PipoRootView: View {
     }
 
     private var menuBarWidth: CGFloat {
-        isInspectorVisible ? 760 : 420
+        isInspectorExpanded ? 760 : 420
     }
 }
 
@@ -1962,7 +1971,8 @@ private struct PipoMenuBarMaterialBackdrop: View {
                     .frame(width: isInspectorVisible && !expanded ? 340 : 380)
             }
             .frame(height: min(660, proxy.size.height))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            .padding(.trailing, 12)
         }
     }
 }
@@ -1970,9 +1980,12 @@ private struct PipoMenuBarMaterialBackdrop: View {
 private struct PipoMenuBarPaneMaterial: View {
     var body: some View {
         if #available(macOS 26.0, *) {
-            Color.clear.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
+            Color.clear
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
         } else {
             RoundedRectangle(cornerRadius: 16).fill(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
 }

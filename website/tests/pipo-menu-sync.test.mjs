@@ -61,6 +61,10 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(html, /html\.embedded body > \.relative[^}]*transform: scale\(1\.27\)/);
   assert.match(html, /@media \(min-width: 736px\)/);
   assert.match(html, /width: 340px; height: 580px; max-width: 340px/);
+  assert.match(html, /html\[data-host-mode="menuBar"\] \.mac-window\s*\{\s*box-shadow: none/);
+  assert.match(html, /--inspector-enter-offset: 356px/);
+  assert.match(runtime, /inspector\.classList\.add\('inspector-exit'\)/);
+  assert.match(runtime, /prefers-reduced-motion: reduce/);
   assert.match(html, /role="tablist"/);
   for (const tab of ["today", "courses", "settings"]) assert.match(html, new RegExp(`id="tab-${tab}"[\\s\\S]{0,100}role="tab"[\\s\\S]{0,100}aria-controls="view-${tab}"`));
   assert.doesNotMatch(html, /h-\[480px\]/);
