@@ -41,7 +41,7 @@ async fn main() {
             match serde_json::from_slice::<Request>(&line) {
                 Ok(request) => {
                     let id = request.id.clone();
-                    match tokio::time::timeout(Duration::from_secs(120), handle(request, &client))
+                    match tokio::time::timeout(Duration::from_secs(60), handle(request, &client))
                         .await
                     {
                         Ok(response) => response,

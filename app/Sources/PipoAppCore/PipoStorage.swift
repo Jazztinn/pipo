@@ -288,7 +288,7 @@ public actor EncryptedDashboardCache: DashboardCache {
         do {
             let box = try AES.GCM.SealedBox(combined: encrypted)
             let data = try AES.GCM.open(box, using: key)
-            return try JSONDecoder().decode(DashboardSnapshot.self, from: data).privacyProjected()
+            return try JSONDecoder().decode(DashboardSnapshot.self, from: data).upgradedToVersionThree().privacyProjected()
         } catch {
             // Cache data is disposable. A key rotation or interrupted migration
             // must not block sign-in or surface a CryptoKit error to the user.

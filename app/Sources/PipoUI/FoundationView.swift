@@ -736,6 +736,8 @@ public struct PipoRootView: View {
     private let model: PipoModel
     private let configuration: PipoUIConfiguration
     private let hostMode: PipoWebMenuHostMode
+    private let onMenuInspectorVisibilityChanged: (Bool) -> Bool
+    private let onMenuDismiss: () -> Void
     @State private var phase: PipoUIPhase
     @State private var snapshot: PipoDashboardSnapshot?
     @State private var selectedTab: PipoTab = .today
@@ -743,9 +745,31 @@ public struct PipoRootView: View {
     @State private var isSignOutConfirmationPresented = false
     @State private var isInspectorVisible = false
 
-    public init(model: PipoModel, configuration: PipoUIConfiguration = PipoUIConfiguration(), hostMode: PipoWebMenuHostMode = .menuBar) {
+    public init(
+        model: PipoModel,
+        configuration: PipoUIConfiguration = PipoUIConfiguration(),
+        hostMode: PipoWebMenuHostMode = .menuBar
+    ) {
+        self.init(
+            model: model,
+            configuration: configuration,
+            hostMode: hostMode,
+            onMenuInspectorVisibilityChanged: { $0 },
+            onMenuDismiss: {}
+        )
+    }
+
+    package init(
+        model: PipoModel,
+        configuration: PipoUIConfiguration = PipoUIConfiguration(),
+        hostMode: PipoWebMenuHostMode = .menuBar,
+        onMenuInspectorVisibilityChanged: @escaping (Bool) -> Bool,
+        onMenuDismiss: @escaping () -> Void
+    ) {
         self.model = model
         self.hostMode = hostMode
+        self.onMenuInspectorVisibilityChanged = onMenuInspectorVisibilityChanged
+        self.onMenuDismiss = onMenuDismiss
         let resolvedConfiguration = configuration.modelBacked ? configuration : PipoUIConfiguration(model: model)
         self.configuration = resolvedConfiguration
         _phase = State(initialValue: resolvedConfiguration.initialPhase)
@@ -784,8 +808,10 @@ public struct PipoRootView: View {
                     configuration: configuration,
                     hostMode: hostMode,
                     onSignOut: { isSignOutConfirmationPresented = true },
+                    onDismissMenu: onMenuDismiss,
                     onInspectorVisibilityChanged: { visible in
                         isInspectorVisible = visible
+                        _ = onMenuInspectorVisibilityChanged(visible)
                     }
                 )
             }
@@ -804,7 +830,7 @@ public struct PipoRootView: View {
                 PipoPalette.canvas
             default:
                 if hostMode == .menuBar {
-                    Color.clear
+                    PipoMenuBarMaterialBackdrop(isInspectorVisible: isInspectorVisible)
                 } else {
                     PipoHostMaterial()
                 }
@@ -1917,6 +1943,36 @@ private struct PipoHostMaterial: View {
             Color.clear.glassEffect(.regular, in: Rectangle())
         } else {
             Rectangle().fill(.thinMaterial)
+        }
+    }
+}
+
+private struct PipoMenuBarMaterialBackdrop: View {
+    let isInspectorVisible: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            let expanded = isInspectorVisible && proxy.size.width >= 736
+            HStack(spacing: 16) {
+                if expanded {
+                    PipoMenuBarPaneMaterial()
+                        .frame(width: 340)
+                }
+                PipoMenuBarPaneMaterial()
+                    .frame(width: isInspectorVisible && !expanded ? 340 : 380)
+            }
+            .frame(height: min(660, proxy.size.height))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct PipoMenuBarPaneMaterial: View {
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            Color.clear.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
+        } else {
+            RoundedRectangle(cornerRadius: 16).fill(.thinMaterial)
         }
     }
 }

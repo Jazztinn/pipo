@@ -37,7 +37,7 @@ public struct SidecarRequest: Codable, Sendable {
     public let method: String
     public let params: [String: PipoJSONValue]
 
-    public init(version: Int = 2, method: String, params: [String: PipoJSONValue]) {
+    public init(version: Int = 3, method: String, params: [String: PipoJSONValue]) {
         self.version = version
         self.id = UUID().uuidString
         self.method = method
@@ -68,44 +68,94 @@ public protocol PipoSidecarTransport: Sendable {
     func send(_ request: SidecarRequest) async throws -> SidecarResponse
 }
 
-public struct PipoCoreProcessTransport: PipoSidecarTransport {
+public actor PipoCoreProcessTransport: PipoSidecarTransport {
     private let executableURL: URL
+    private var process: Process?
+    private var stdin: FileHandle?
+    private var stdout: FileHandle?
+    private var stdoutBuffer = Data()
+    private var stderrDrain: Task<Void, Never>?
 
     public init(executableURL: URL? = nil) {
         self.executableURL = executableURL ?? Self.defaultExecutableURL()
     }
 
     public func send(_ request: SidecarRequest) async throws -> SidecarResponse {
-        let executableURL = executableURL
-        return try await Task.detached(priority: .userInitiated) {
-            guard FileManager.default.isExecutableFile(atPath: executableURL.path) else { throw PipoCoreError.sidecarUnavailable }
-            let input = try JSONEncoder().encode(request) + Data([0x0A])
-            let process = Process()
-            process.executableURL = executableURL
-            let stdin = Pipe()
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardInput = stdin
-            process.standardOutput = stdout
-            process.standardError = stderr
-            try process.run()
-            stdin.fileHandleForWriting.write(input)
-            try stdin.fileHandleForWriting.close()
-            let data = stdout.fileHandleForReading.readDataToEndOfFile()
-            let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else {
-                throw PipoCoreError.operationFailed(PipoSecrets.redact(String(decoding: errorData, as: UTF8.self)))
+        var finalError: Error = PipoCoreError.sidecarUnavailable
+        var validResponse: SidecarResponse?
+        for attempt in 0..<2 {
+            do {
+                try startIfNeeded()
+                guard let stdin, let stdout else { throw PipoCoreError.sidecarUnavailable }
+                stdin.write(try JSONEncoder().encode(request) + Data([0x0A]))
+                let line = try readLine(from: stdout)
+                let response = try JSONDecoder().decode(SidecarResponse.self, from: line)
+                try response.validate(for: request)
+                validResponse = response
+                break
+            } catch {
+                finalError = error
+                stopSession()
+                if attempt == 1 { break }
             }
-            guard let line = data.split(separator: 0x0A).first else { throw PipoCoreError.invalidResponse }
-            let response = try JSONDecoder().decode(SidecarResponse.self, from: Data(line))
-            try response.validate(for: request)
-            if let failure = response.error { throw PipoCoreError.operationFailed(failure.message) }
-            return response
-        }.value
+        }
+        guard let response = validResponse else { throw finalError }
+        if let failure = response.error { throw PipoCoreError.operationFailed(failure.message) }
+        return response
     }
 
-    private static func defaultExecutableURL() -> URL {
+    public func shutdown() {
+        stopSession()
+    }
+
+    private func startIfNeeded() throws {
+        if process?.isRunning == true { return }
+        stopSession()
+        guard FileManager.default.isExecutableFile(atPath: executableURL.path) else { throw PipoCoreError.sidecarUnavailable }
+        let process = Process()
+        let input = Pipe()
+        let output = Pipe()
+        let errors = Pipe()
+        process.executableURL = executableURL
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = errors
+        try process.run()
+        self.process = process
+        stdin = input.fileHandleForWriting
+        stdout = output.fileHandleForReading
+        let errorHandle = errors.fileHandleForReading
+        stderrDrain = Task.detached(priority: .utility) {
+            _ = try? errorHandle.readToEnd()
+        }
+    }
+
+    private func readLine(from handle: FileHandle) throws -> Data {
+        while true {
+            if let newline = stdoutBuffer.firstIndex(of: 0x0A) {
+                let line = Data(stdoutBuffer[..<newline])
+                stdoutBuffer.removeSubrange(...newline)
+                return line
+            }
+            guard let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty else { throw PipoCoreError.invalidResponse }
+            stdoutBuffer.append(chunk)
+            guard stdoutBuffer.count <= 8 * 1024 * 1024 else { throw PipoCoreError.invalidResponse }
+        }
+    }
+
+    private func stopSession() {
+        try? stdin?.close()
+        try? stdout?.close()
+        if process?.isRunning == true { process?.terminate() }
+        stderrDrain?.cancel()
+        stderrDrain = nil
+        stdoutBuffer.removeAll(keepingCapacity: true)
+        stdin = nil
+        stdout = nil
+        process = nil
+    }
+
+    nonisolated private static func defaultExecutableURL() -> URL {
         if let configured = ProcessInfo.processInfo.environment["PIPO_CORE_PATH"], !configured.isEmpty { return URL(fileURLWithPath: configured) }
         return Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/pipo-core")
     }

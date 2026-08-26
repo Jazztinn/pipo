@@ -2,7 +2,14 @@
 //! ALinuxPerson/openlms-mcp at c5a09e9f70d56def5e26acea425d1a7dfd514503.
 //! Pipo intentionally exposes a small read-only subset and no network listener.
 
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use futures_util::{StreamExt, stream};
 use reqwest::{Client, redirect};
@@ -12,7 +19,7 @@ use thiserror::Error;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use url::Url;
 
-pub const PROTOCOL_VERSION: u8 = 2;
+pub const PROTOCOL_VERSION: u8 = 3;
 pub const LMS_ORIGIN: &str = "https://lms.lpucavite.edu.ph";
 pub const REQUEST_CAP_BYTES: usize = 2 * 1024 * 1024;
 const RESPONSE_CAP_BYTES: usize = 2 * 1024 * 1024;
@@ -21,17 +28,34 @@ const SERVICE: &str = "moodle_mobile_app";
 const CALENDAR_EVENT_LIMIT: usize = 30;
 const ANNOUNCEMENT_LIMIT: usize = 20;
 const RESOURCE_LIMIT: usize = 30;
-const ASSIGNMENT_STATUS_LIMIT: usize = 30;
+const ASSIGNMENT_STATUS_LIMIT: usize = 12;
 const ASSIGNMENT_STATUS_CONCURRENCY: usize = 4;
+const COURSE_FETCH_CONCURRENCY: usize = 4;
+const ACTIONABLE_ASSIGNMENT_WINDOW_SECS: i64 = 7 * 24 * 60 * 60;
 const DASHBOARD_SECTIONS: &[&str] = &[
     "schedule",
     "due_soon",
     "assignments",
     "announcements",
+    "notifications",
     "messages",
     "grades",
     "resources",
 ];
+
+#[cfg(test)]
+fn dashboard_core_call_budget(actionable_assignments: usize) -> usize {
+    2 + 4 + actionable_assignments.min(ASSIGNMENT_STATUS_LIMIT)
+}
+
+#[cfg(test)]
+fn dashboard_heavy_call_budget(
+    courses: usize,
+    forums: usize,
+    actionable_assignments: usize,
+) -> usize {
+    dashboard_core_call_budget(actionable_assignments) + (2 * courses) + forums
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Request {
@@ -112,6 +136,7 @@ impl From<reqwest::Error> for CoreError {
 pub struct MoodleClient {
     http: Client,
     origin: Url,
+    call_count: Arc<AtomicUsize>,
 }
 
 impl MoodleClient {
@@ -142,12 +167,16 @@ impl MoodleClient {
         });
         let http = Client::builder()
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(20))
             .redirect(redirects)
             .user_agent(concat!("pipo-core/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(CoreError::from)?;
-        Ok(Self { http, origin })
+        Ok(Self {
+            http,
+            origin,
+            call_count: Arc::new(AtomicUsize::new(0)),
+        })
     }
 
     #[cfg(test)]
@@ -222,6 +251,7 @@ impl MoodleClient {
         token: &str,
         requested_sections: Option<&[Value]>,
     ) -> Result<Value, CoreError> {
+        self.call_count.store(0, Ordering::Relaxed);
         let requested = normalize_sections(requested_sections)?;
         let site = self.site_info(token).await?;
         let user_id = site
@@ -249,36 +279,92 @@ impl MoodleClient {
         let mut section_timestamps = Map::new();
         let now = unix_now();
         let wants_calendar = requested.contains("due_soon") || requested.contains("schedule");
-        let events = if wants_calendar
-            && capabilities.contains("core_calendar_get_action_events_by_timesort")
-        {
-            match self.call(
+        let calendar_fetch = async {
+            if !wants_calendar
+                || !capabilities.contains("core_calendar_get_action_events_by_timesort")
+            {
+                return None;
+            }
+            Some(self.call(
                 token,
                 "core_calendar_get_action_events_by_timesort",
                 json!({ "timesortfrom": now, "timesortto": now + (7 * 24 * 60 * 60), "limitnum": CALENDAR_EVENT_LIMIT }),
-            )
-            .await {
-                Ok(value) => {
-                    if requested.contains("due_soon") { section_timestamps.insert("due_soon".to_owned(), Value::String(rfc3339_now())); }
-                    if requested.contains("schedule") { section_timestamps.insert("schedule".to_owned(), Value::String(rfc3339_now())); }
-                    value
-                }
-                Err(error) => {
-                    if requested.contains("due_soon") { failures.push(section_failure("Due soon", &error)); }
-                    if requested.contains("schedule") { failures.push(section_failure("Schedule", &error)); }
-                    Value::Null
-                }
-            }
-        } else {
-            Value::Null
+            ).await)
         };
-        let calendar_items = events
+        let notifications_fetch = async {
+            if !requested.contains("notifications")
+                || !capabilities.contains("message_popup_get_popup_notifications")
+            {
+                return None;
+            }
+            Some(
+                self.call(
+                    token,
+                    "message_popup_get_popup_notifications",
+                    json!({ "limit": 20, "offset": 0 }),
+                )
+                .await,
+            )
+        };
+        let assignments_fetch = async {
+            if !requested.contains("assignments")
+                || !capabilities.contains("mod_assign_get_assignments")
+            {
+                return None;
+            }
+            Some(self.call(token, "mod_assign_get_assignments", json!({ "courseids": courses.iter().filter_map(|course| course.get("id").and_then(Value::as_i64)).collect::<Vec<_>>() })).await)
+        };
+        let messages_fetch = async {
+            if !requested.contains("messages")
+                || !capabilities.contains("core_message_get_conversations")
+            {
+                return None;
+            }
+            Some(
+                self.call(
+                    token,
+                    "core_message_get_conversations",
+                    json!({ "userid": user_id, "limitfrom": 0, "limitnum": 10 }),
+                )
+                .await,
+            )
+        };
+        let (events_result, notifications_result, assignments_result, messages_result) = tokio::join!(
+            calendar_fetch,
+            notifications_fetch,
+            assignments_fetch,
+            messages_fetch
+        );
+
+        let events = match events_result {
+            Some(Ok(value)) => {
+                if requested.contains("due_soon") {
+                    section_timestamps.insert("due_soon".to_owned(), Value::String(rfc3339_now()));
+                }
+                if requested.contains("schedule") {
+                    section_timestamps.insert("schedule".to_owned(), Value::String(rfc3339_now()));
+                }
+                value
+            }
+            Some(Err(error)) => {
+                if requested.contains("due_soon") {
+                    failures.push(section_failure("Due soon", &error));
+                }
+                if requested.contains("schedule") {
+                    failures.push(section_failure("Schedule", &error));
+                }
+                Value::Null
+            }
+            None => Value::Null,
+        };
+        let mut calendar_items = events
             .get("events")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .map(event_item)
             .collect::<Vec<_>>();
+        backfill_course_names(&mut calendar_items, &courses);
         let due_soon = if requested.contains("due_soon") {
             calendar_items
                 .clone()
@@ -302,29 +388,16 @@ impl MoodleClient {
             .filter_map(|item| item.get("destination").and_then(Value::as_str))
             .collect::<HashSet<_>>();
 
-        let notifications = if requested.contains("notifications")
-            && capabilities.contains("message_popup_get_popup_notifications")
-        {
-            match self
-                .call(
-                    token,
-                    "message_popup_get_popup_notifications",
-                    json!({ "limit": 20, "offset": 0 }),
-                )
-                .await
-            {
-                Ok(value) => {
-                    section_timestamps
-                        .insert("notifications".to_owned(), Value::String(rfc3339_now()));
-                    value
-                }
-                Err(error) => {
-                    failures.push(section_failure("Notifications", &error));
-                    Value::Null
-                }
+        let notifications = match notifications_result {
+            Some(Ok(value)) => {
+                section_timestamps.insert("notifications".to_owned(), Value::String(rfc3339_now()));
+                value
             }
-        } else {
-            Value::Null
+            Some(Err(error)) => {
+                failures.push(section_failure("Notifications", &error));
+                Value::Null
+            }
+            None => Value::Null,
         };
         let notifications = notifications
             .get("notifications")
@@ -335,31 +408,26 @@ impl MoodleClient {
             .filter(|item| item.get("is_unread") == Some(&Value::Bool(true)))
             .collect::<Vec<_>>();
 
-        let assignments = if requested.contains("assignments")
-            && capabilities.contains("mod_assign_get_assignments")
-        {
-            match self.call(token, "mod_assign_get_assignments", json!({ "courseids": courses.iter().filter_map(|course| course.get("id").and_then(Value::as_i64)).collect::<Vec<_>>() })).await {
-                Ok(value) => { section_timestamps.insert("assignments".to_owned(), Value::String(rfc3339_now())); value },
-                Err(error) => {
-                    failures.push(section_failure("Assignments", &error));
-                    Value::Null
-                }
+        let assignments = match assignments_result {
+            Some(Ok(value)) => {
+                section_timestamps.insert("assignments".to_owned(), Value::String(rfc3339_now()));
+                value
             }
-        } else {
-            Value::Null
+            Some(Err(error)) => {
+                failures.push(section_failure("Assignments", &error));
+                Value::Null
+            }
+            None => Value::Null,
         };
         let mut assignment_items = assignment_items(&assignments)
             .into_iter()
             .map(|item| with_section(item, "assignments"))
             .collect::<Vec<_>>();
+        backfill_course_names(&mut assignment_items, &courses);
         if requested.contains("assignments")
             && capabilities.contains("mod_assign_get_submission_status")
         {
-            let assignments_for_status = assignment_items
-                .iter()
-                .take(ASSIGNMENT_STATUS_LIMIT)
-                .cloned()
-                .collect::<Vec<_>>();
+            let assignments_for_status = actionable_assignments(&assignment_items);
             let status_results = stream::iter(assignments_for_status.into_iter().map(
                 |assignment| async move {
                     let assign_id = assignment
@@ -423,28 +491,16 @@ impl MoodleClient {
             })
             .collect::<Vec<_>>();
 
-        let messages = if requested.contains("messages")
-            && capabilities.contains("core_message_get_conversations")
-        {
-            match self
-                .call(
-                    token,
-                    "core_message_get_conversations",
-                    json!({ "userid": user_id, "limitfrom": 0, "limitnum": 10 }),
-                )
-                .await
-            {
-                Ok(value) => {
-                    section_timestamps.insert("messages".to_owned(), Value::String(rfc3339_now()));
-                    value
-                }
-                Err(error) => {
-                    failures.push(section_failure("Messages", &error));
-                    Value::Null
-                }
+        let messages = match messages_result {
+            Some(Ok(value)) => {
+                section_timestamps.insert("messages".to_owned(), Value::String(rfc3339_now()));
+                value
             }
-        } else {
-            Value::Null
+            Some(Err(error)) => {
+                failures.push(section_failure("Messages", &error));
+                Value::Null
+            }
+            None => Value::Null,
         };
         let messages = messages
             .get("conversations")
@@ -458,16 +514,22 @@ impl MoodleClient {
         let mut courses_with_grades = Vec::new();
         if requested.contains("grades") && capabilities.contains("gradereport_user_get_grade_items")
         {
-            for course in &courses {
+            let grade_results = stream::iter(courses.iter().cloned().map(|course| async move {
                 let course_id = course.get("id").and_then(Value::as_i64).unwrap_or_default();
-                let grades = match self
+                let result = self
                     .call(
                         token,
                         "gradereport_user_get_grade_items",
                         json!({ "courseid": course_id, "userid": user_id }),
                     )
-                    .await
-                {
+                    .await;
+                (course, result)
+            }))
+            .buffered(COURSE_FETCH_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
+            for (course, result) in grade_results {
+                let grades = match result {
                     Ok(value) => value,
                     Err(error) => {
                         failures.push(section_failure("Grades", &error));
@@ -475,7 +537,7 @@ impl MoodleClient {
                         continue;
                     }
                 };
-                let published = published_grade_items(&grades, course);
+                let published = published_grade_items(&grades, &course);
                 if let Some(total) = published
                     .iter()
                     .find(|item| item.get("is_total") == Some(&Value::Bool(true)))
@@ -538,6 +600,11 @@ impl MoodleClient {
             .collect::<Vec<_>>();
 
         let next_up = due_soon.iter().take(3).cloned().collect::<Vec<_>>();
+        let failures = aggregate_failures(failures);
+        let supported = capability_support(&site);
+        let section_results =
+            build_section_results(&requested, &section_timestamps, &supported, &failures);
+        let call_count = self.call_count.load(Ordering::Relaxed);
 
         Ok(json!({
             "version": PROTOCOL_VERSION,
@@ -550,7 +617,9 @@ impl MoodleClient {
             "announcements": announcements,
             "resources": resources,
             "section_timestamps": section_timestamps,
-            "supported": capability_support(&site),
+            "supported": supported,
+            "section_results": section_results,
+            "diagnostics": { "lms_call_count": call_count },
             "assignment_ids": assignment_ids,
             "courses": courses_with_counts,
             "failures": failures
@@ -561,6 +630,7 @@ impl MoodleClient {
         if course_id <= 0 {
             return Err(CoreError::Input("course_id must be positive".to_owned()));
         }
+        self.call_count.store(0, Ordering::Relaxed);
         let site = self.site_info(token).await?;
         let user_id = site
             .get("userid")
@@ -680,6 +750,15 @@ impl MoodleClient {
             _ => Vec::new(),
         };
 
+        let failures = aggregate_failures(failures);
+        let section_results = build_course_section_results(
+            supports_assignments,
+            supports_grades,
+            supports_announcements,
+            supports_resources,
+            &failures,
+        );
+        let call_count = self.call_count.load(Ordering::Relaxed);
         Ok(json!({
             "version": PROTOCOL_VERSION,
             "course": course,
@@ -694,6 +773,8 @@ impl MoodleClient {
                 "announcements": supports_announcements,
                 "resources": supports_resources
             },
+            "section_results": section_results,
+            "diagnostics": { "lms_call_count": call_count },
             "destination": format!("/course/view.php?id={course_id}"),
             "failures": failures
         }))
@@ -705,11 +786,7 @@ impl MoodleClient {
         assignments: &mut [Value],
         failures: &mut Vec<String>,
     ) {
-        let source = assignments
-            .iter()
-            .take(ASSIGNMENT_STATUS_LIMIT)
-            .cloned()
-            .collect::<Vec<_>>();
+        let source = actionable_assignments(assignments);
         let results = stream::iter(source.into_iter().map(|assignment| async move {
             let assign_id = assignment
                 .get("id")
@@ -774,21 +851,29 @@ impl MoodleClient {
             && capabilities.contains("mod_forum_get_forum_discussions_paginated");
         let mut announcements = Vec::new();
         let mut resources = Vec::new();
-        for course in courses {
+        let content_results = stream::iter(courses.iter().cloned().map(|course| async move {
+            let course_id = course.get("id").and_then(Value::as_i64);
+            let result = match course_id {
+                Some(course_id) => {
+                    self.call(
+                        token,
+                        "core_course_get_contents",
+                        json!({ "courseid": course_id }),
+                    )
+                    .await
+                }
+                None => Err(CoreError::Response("course omitted id".to_owned())),
+            };
+            (course, result)
+        }))
+        .buffered(COURSE_FETCH_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+        for (course, result) in content_results {
             if announcements.len() >= ANNOUNCEMENT_LIMIT && resources.len() >= RESOURCE_LIMIT {
                 break;
             }
-            let Some(course_id) = course.get("id").and_then(Value::as_i64) else {
-                continue;
-            };
-            let contents = match self
-                .call(
-                    token,
-                    "core_course_get_contents",
-                    json!({ "courseid": course_id }),
-                )
-                .await
-            {
+            let contents = match result {
                 Ok(value) => value,
                 Err(error) => {
                     failures.push(section_failure("Course content", &error));
@@ -797,7 +882,7 @@ impl MoodleClient {
             };
             if supports_announcements && announcements.len() < ANNOUNCEMENT_LIMIT {
                 announcements.extend(
-                    self.announcements_from_contents(token, &contents, course, failures)
+                    self.announcements_from_contents(token, &contents, &course, failures)
                         .await
                         .into_iter()
                         .take(ANNOUNCEMENT_LIMIT - announcements.len()),
@@ -805,7 +890,7 @@ impl MoodleClient {
             }
             if wants_resources && resources.len() < RESOURCE_LIMIT {
                 resources.extend(
-                    resource_items(&contents, course)
+                    resource_items(&contents, &course)
                         .into_iter()
                         .take(RESOURCE_LIMIT - resources.len()),
                 );
@@ -867,6 +952,7 @@ impl MoodleClient {
         if token.is_empty() {
             return Err(CoreError::Authentication("token is required".to_owned()));
         }
+        self.call_count.fetch_add(1, Ordering::Relaxed);
         let mut form = vec![
             ("wstoken".to_owned(), token.to_owned()),
             ("wsfunction".to_owned(), function.to_owned()),
@@ -1132,7 +1218,19 @@ fn safe_site(site: &Value) -> Value {
     json!({ "site_name": site.get("sitename"), "student_name": site.get("fullname"), "user_id": site.get("userid"), "site_url": LMS_ORIGIN })
 }
 fn course_summary(course: Value) -> Value {
-    json!({ "id": course.get("id"), "name": course.get("fullname").or_else(|| course.get("displayname")).unwrap_or(&Value::String("Course".to_owned())), "short_name": course.get("shortname"), })
+    let id = course.get("id").cloned().unwrap_or(Value::Null);
+    let name = course
+        .get("fullname")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            course
+                .get("displayname")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or("Course");
+    json!({ "id": id, "entity_key": format!("course:{}", value_identifier(&id)), "name": name, "short_name": course.get("shortname"), })
 }
 fn timestamp_is_today(value: Option<&str>) -> bool {
     let Some(value) = value else { return false };
@@ -1140,6 +1238,49 @@ fn timestamp_is_today(value: Option<&str>) -> bool {
         return false;
     };
     timestamp.date() == OffsetDateTime::now_utc().date()
+}
+fn actionable_assignments(items: &[Value]) -> Vec<Value> {
+    let now = OffsetDateTime::now_utc();
+    let earliest = now - time::Duration::days(7);
+    let latest = now + time::Duration::seconds(ACTIONABLE_ASSIGNMENT_WINDOW_SECS);
+    let mut actionable = items
+        .iter()
+        .filter_map(|item| {
+            let timestamp = item.get("timestamp")?.as_str()?;
+            let due = OffsetDateTime::parse(timestamp, &Rfc3339).ok()?;
+            (due >= earliest && due <= latest).then(|| (due, item.clone()))
+        })
+        .collect::<Vec<_>>();
+    actionable.sort_by_key(|(due, _)| *due);
+    actionable
+        .into_iter()
+        .take(ASSIGNMENT_STATUS_LIMIT)
+        .map(|(_, item)| item)
+        .collect()
+}
+fn backfill_course_names(items: &mut [Value], courses: &[Value]) {
+    for item in items {
+        let Some(course_id) = item.get("course_id").and_then(Value::as_i64) else {
+            continue;
+        };
+        let needs_name = item
+            .get("course_name")
+            .and_then(Value::as_str)
+            .is_none_or(|name| name.trim().is_empty() || name == "Course");
+        if !needs_name {
+            continue;
+        }
+        let Some(name) = courses.iter().find_map(|course| {
+            (course.get("id").and_then(Value::as_i64) == Some(course_id))
+                .then(|| course.get("name").and_then(Value::as_str))
+                .flatten()
+        }) else {
+            continue;
+        };
+        item.as_object_mut()
+            .expect("dashboard item object")
+            .insert("course_name".to_owned(), Value::String(name.to_owned()));
+    }
 }
 fn destination(value: &Value) -> String {
     value
@@ -1170,7 +1311,18 @@ fn item(
     timestamp: Value,
     destination_value: String,
 ) -> Value {
-    json!({ "id": id, "kind": kind, "title": title, "course_id": course_id, "course_name": course_name, "timestamp": timestamp, "destination": destination_value })
+    let entity_key = entity_key(kind, &id, &course_id, &destination_value);
+    json!({ "id": id, "entity_key": entity_key, "kind": kind, "title": title, "course_id": course_id, "course_name": course_name, "timestamp": timestamp, "destination": destination_value })
+}
+fn entity_key(kind: &str, id: &Value, course_id: &Value, destination: &str) -> String {
+    if kind != "grade" && !destination.is_empty() {
+        return format!("lms:{destination}");
+    }
+    format!(
+        "{kind}:{}:{}",
+        value_identifier(course_id),
+        value_identifier(id)
+    )
 }
 fn with_section(mut item: Value, section: &str) -> Value {
     item.as_object_mut()
@@ -1491,11 +1643,15 @@ fn published_grade_items(value: &Value, course: &Value) -> Vec<Value> {
     value.get("usergrades").and_then(Value::as_array).and_then(|items| items.first()).and_then(|grade| grade.get("gradeitems")).and_then(Value::as_array).into_iter().flatten().filter(|grade| grade.get("hidden").and_then(Value::as_i64).unwrap_or(0) == 0).map(|grade| {
         let published_grade = grade.get("gradeformatted").cloned().unwrap_or(Value::Null);
         let feedback = grade.get("feedback").and_then(Value::as_str).and_then(plain_feedback);
+        let id = grade.get("id").cloned().unwrap_or(Value::Null);
+        let course_id = course.get("id").cloned().unwrap_or(Value::Null);
+        let entity_key = entity_key("grade", &id, &course_id, "");
         json!({
-            "id": grade.get("id"),
+            "id": id,
+            "entity_key": entity_key,
             "kind": "grade",
             "title": grade.get("itemname").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).unwrap_or("Published grade"),
-            "course_id": course.get("id"),
+            "course_id": course_id,
             "course_name": course.get("name"),
             "timestamp": grade.get("gradedategraded").map(timestamp_value).unwrap_or(Value::Null),
             "destination": "",
@@ -1518,13 +1674,17 @@ fn course_grade_items(value: &Value, course: &Value) -> Vec<Value> {
         .filter(|grade| grade.get("hidden").and_then(Value::as_i64).unwrap_or(0) == 0)
         .map(|grade| {
             let course_id = course.get("id").and_then(Value::as_i64).unwrap_or_default();
+            let id = grade.get("id").cloned().unwrap_or(Value::Null);
+            let destination = format!("/grade/report/user/index.php?id={course_id}");
+            let entity_key = entity_key("grade", &id, &json!(course_id), &destination);
             json!({
-                "id": grade.get("id"),
+                "id": id,
+                "entity_key": entity_key,
                 "title": grade.get("itemname").cloned().unwrap_or(Value::String("Published grade".to_owned())),
                 "published_grade": grade.get("gradeformatted"),
                 "feedback": grade.get("feedback").and_then(Value::as_str).and_then(plain_feedback),
                 "timestamp": grade.get("gradedategraded").map(timestamp_value).unwrap_or(Value::Null),
-                "destination": format!("/grade/report/user/index.php?id={course_id}"),
+                "destination": destination,
                 "is_total": grade.get("itemtype").and_then(Value::as_str) == Some("course")
             })
         })
@@ -1574,6 +1734,110 @@ fn value_identifier(value: &Value) -> String {
 }
 fn section_failure(section: &str, error: &CoreError) -> String {
     format!("{section}: {}", redact(&error.to_string()))
+}
+fn aggregate_failures(failures: Vec<String>) -> Vec<String> {
+    let mut grouped: BTreeMap<String, (String, usize)> = BTreeMap::new();
+    for failure in failures {
+        let section = failure
+            .split_once(':')
+            .map(|(section, _)| section)
+            .unwrap_or("LMS");
+        let entry = grouped.entry(section.to_owned()).or_insert((failure, 0));
+        entry.1 += 1;
+    }
+    grouped
+        .into_values()
+        .map(|(failure, count)| {
+            if count > 1 {
+                format!("{failure} ({count} occurrences)")
+            } else {
+                failure
+            }
+        })
+        .collect()
+}
+fn failure_for_section<'a>(failures: &'a [String], section: &str) -> Option<&'a str> {
+    let labels: &[&str] = match section {
+        "due_soon" | "schedule" => &["Due soon:", "Schedule:"],
+        "assignments" => &["Assignments:", "Submission status:"],
+        "notifications" => &["Notifications:"],
+        "messages" => &["Messages:"],
+        "grades" => &["Grades:"],
+        "announcements" => &["Announcements:", "Course content:"],
+        "resources" => &["Course content:"],
+        _ => &[],
+    };
+    failures
+        .iter()
+        .find(|failure| labels.iter().any(|label| failure.starts_with(label)))
+        .map(String::as_str)
+}
+fn build_section_results(
+    requested: &HashSet<String>,
+    timestamps: &Map<String, Value>,
+    supported: &Value,
+    failures: &[String],
+) -> Value {
+    let mut results = Map::new();
+    for section in requested {
+        let is_supported = supported
+            .get(section)
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let error = failure_for_section(failures, section);
+        let refreshed_at = timestamps.get(section).cloned().unwrap_or(Value::Null);
+        let status = if !is_supported {
+            "unsupported"
+        } else if error.is_some() && !refreshed_at.is_null() {
+            "partial"
+        } else if error.is_some() {
+            "failed"
+        } else {
+            "success"
+        };
+        results.insert(
+            section.clone(),
+            json!({
+                "status": status,
+                "refreshed_at": refreshed_at,
+                "error": error
+            }),
+        );
+    }
+    Value::Object(results)
+}
+fn build_course_section_results(
+    assignments: bool,
+    grades: bool,
+    announcements: bool,
+    resources: bool,
+    failures: &[String],
+) -> Value {
+    let supported = [
+        ("assignments", assignments),
+        ("grades", grades),
+        ("announcements", announcements),
+        ("resources", resources),
+    ];
+    Value::Object(
+        supported
+            .into_iter()
+            .map(|(section, supported)| {
+                let error = failure_for_section(failures, section);
+                let status = if !supported {
+                    "unsupported"
+                } else if error.is_some() {
+                    "failed"
+                } else {
+                    "success"
+                };
+                (
+                    section.to_owned(),
+                    json!({ "status": status, "error": error }),
+                )
+            })
+            .collect(),
+    )
 }
 
 pub fn redact(value: &str) -> String {
@@ -1704,7 +1968,74 @@ mod tests {
         .unwrap();
         assert!(sections.contains("resources"));
         assert!(sections.contains("schedule"));
+        assert!(normalize_sections(None).unwrap().contains("notifications"));
         assert!(normalize_sections(Some(&[Value::String("write_grade".to_owned())])).is_err());
+    }
+    #[test]
+    fn entity_key_unifies_same_lms_destination() {
+        let calendar = item(
+            json!(1),
+            "assignment",
+            json!("Essay"),
+            json!(12),
+            json!("History"),
+            Value::Null,
+            "/mod/assign/view.php?id=42".to_owned(),
+        );
+        let assignment = item(
+            json!(99),
+            "assignment",
+            json!("Essay"),
+            json!(12),
+            json!("History"),
+            Value::Null,
+            "/mod/assign/view.php?id=42".to_owned(),
+        );
+        assert_eq!(calendar["entity_key"], assignment["entity_key"]);
+        assert_eq!(calendar["entity_key"], "lms:/mod/assign/view.php?id=42");
+    }
+    #[test]
+    fn course_name_backfill_replaces_generic_name() {
+        let mut items = vec![item(
+            json!(1),
+            "assignment",
+            json!("Essay"),
+            json!(12),
+            json!("Course"),
+            Value::Null,
+            String::new(),
+        )];
+        backfill_course_names(
+            &mut items,
+            &[json!({ "id": 12, "name": "History of Magic" })],
+        );
+        assert_eq!(items[0]["course_name"], "History of Magic");
+    }
+    #[test]
+    fn failures_are_aggregated_by_section() {
+        let failures = aggregate_failures(vec![
+            "Grades: request timed out".to_owned(),
+            "Grades: another request timed out".to_owned(),
+            "Messages: unavailable".to_owned(),
+        ]);
+        assert_eq!(failures.len(), 2);
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure == "Grades: request timed out (2 occurrences)")
+        );
+    }
+    #[test]
+    fn structured_section_results_distinguish_failure_and_unsupported() {
+        let requested = HashSet::from(["grades".to_owned(), "messages".to_owned()]);
+        let results = build_section_results(
+            &requested,
+            &Map::new(),
+            &json!({ "grades": true, "messages": false }),
+            &["Grades: request timed out".to_owned()],
+        );
+        assert_eq!(results["grades"]["status"], "failed");
+        assert_eq!(results["messages"]["status"], "unsupported");
     }
     #[test]
     fn submission_status_has_read_only_normalization() {
@@ -1720,6 +2051,56 @@ mod tests {
             submission_status(&json!({ "submission": { "status": "reopened" } })),
             "reopened"
         );
+    }
+    #[test]
+    fn submission_status_candidates_are_windowed_and_capped() {
+        let now = OffsetDateTime::now_utc();
+        let mut assignments = (0..40)
+            .map(|index| {
+                item(
+                    json!(index + 1),
+                    "assignment",
+                    json!(format!("Assignment {index}")),
+                    json!(12),
+                    json!("History"),
+                    json!(
+                        (now + time::Duration::hours(index))
+                            .format(&Rfc3339)
+                            .unwrap()
+                    ),
+                    String::new(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assignments.push(item(
+            json!(99),
+            "assignment",
+            json!("Far future"),
+            json!(12),
+            json!("History"),
+            json!((now + time::Duration::days(8)).format(&Rfc3339).unwrap()),
+            String::new(),
+        ));
+        assignments.push(item(
+            json!(100),
+            "assignment",
+            json!("Too old"),
+            json!(12),
+            json!("History"),
+            json!((now - time::Duration::days(8)).format(&Rfc3339).unwrap()),
+            String::new(),
+        ));
+        let selected = actionable_assignments(&assignments);
+        assert_eq!(ASSIGNMENT_STATUS_LIMIT, 12);
+        assert_eq!(selected.len(), ASSIGNMENT_STATUS_LIMIT);
+        assert!(selected.iter().all(|item| item["title"] != "Far future"));
+        assert!(selected.iter().all(|item| item["title"] != "Too old"));
+    }
+    #[test]
+    fn five_course_call_budgets_are_bounded() {
+        assert_eq!(dashboard_core_call_budget(100), 18);
+        assert!(dashboard_core_call_budget(100) <= 18);
+        assert_eq!(dashboard_heavy_call_budget(5, 3, 100), 31);
     }
     #[test]
     fn resources_drop_cross_origin_urls() {

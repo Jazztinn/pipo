@@ -30,7 +30,7 @@
       backdrop-filter: blur(40px) saturate(200%);
       -webkit-backdrop-filter: blur(40px) saturate(200%);
       border: 1px solid rgba(255, 255, 255, 0.12);
-      box-shadow: none;
+      box-shadow: 0 16px 38px rgba(0, 0, 0, 0.28), 0 0 1px rgba(255, 255, 255, 0.16);
     }
 
     html[data-host-mode="menuBar"] .mac-window {
@@ -40,8 +40,7 @@
     .mac-card {
       background: rgba(255, 255, 255, 0.04);
       border: 1px solid rgba(255, 255, 255, 0.07);
-      backdrop-filter: blur(10px);
-      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .mac-card:hover {
@@ -96,8 +95,8 @@
     /* Custom Apple Toggle Switch */
     .apple-switch {
       appearance: none;
-      width: 36px;
-      height: 20px;
+      width: 40px;
+      height: 28px;
       background: rgba(255, 255, 255, 0.18);
       border-radius: 12px;
       position: relative;
@@ -113,18 +112,18 @@
     .apple-switch::before {
       content: '';
       position: absolute;
-      width: 16px;
-      height: 16px;
+      width: 20px;
+      height: 20px;
       border-radius: 50%;
-      top: 2px;
-      left: 2px;
+      top: 4px;
+      left: 4px;
       background: white;
       transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     }
 
     .apple-switch:checked::before {
-      transform: translateX(16px);
+      transform: translateX(12px);
     }
 
     body > .relative {
@@ -132,21 +131,26 @@
       width: 100%;
       height: 100%;
       max-width: none;
-      display: block;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
     }
 
     body > .relative > .mac-window.w-\[380px\] {
-      width: 100%;
-      height: 100%;
-      max-width: none;
+      width: 380px;
+      height: min(660px, 100%);
+      max-width: calc(100% - 40px);
+      flex: 0 0 380px;
       border-radius: 16px;
     }
 
     #main-panel { min-height: 0; }
-    #main-panel > .view-panel { flex: 1 1 auto; min-height: 0; height: auto !important; overscroll-behavior: contain; }
+    #main-panel > .view-panel { flex: 1 1 auto; min-height: 0; height: auto !important; overscroll-behavior: contain; scrollbar-gutter: stable; }
     #main-panel > .view-panel.hidden { display: none; }
-    #main-navigation { flex: 0 0 auto; position: relative; z-index: 30; padding: 8px 10px 12px; min-height: 58px; box-shadow: 0 -12px 28px rgba(12, 11, 15, .18); }
-    .mac-segmented-btn { min-height: 34px; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+    #main-navigation { flex: 0 0 auto; position: relative; z-index: 30; padding: 8px 14px 12px; min-height: 58px; box-shadow: 0 -12px 28px rgba(12, 11, 15, .18); }
+    #main-navigation .mac-segmented { width: 100%; max-width: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .mac-segmented-btn { flex: 1 1 0; min-width: 0; height: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; font-weight: 600; }
     .mac-segmented-btn i { width: 12px; font-size: 10px; }
     #sync-button { min-height: 24px; }
     #sync-dot[data-phase="ready"] { background: #34d399; }
@@ -158,23 +162,26 @@
       position: absolute;
       z-index: 80;
       inset: 0;
-      width: 100%;
-      max-width: none;
+      width: 340px;
+      height: min(660px, 100%);
+      max-width: calc(100% - 40px);
       max-height: none;
       border-radius: 16px;
+      overflow: hidden;
+      margin: auto;
     }
 
-    @media (min-width: 720px) {
+    @media (min-width: 736px) {
       body > .relative {
         display: flex;
-        align-items: center;
+        align-items: stretch;
         justify-content: center;
         gap: 16px;
       }
 
       body > .relative > .mac-window.w-\[380px\] {
         width: 380px;
-        height: 660px;
+        height: min(660px, 100%);
         max-width: 380px;
         flex: 0 0 380px;
       }
@@ -184,8 +191,10 @@
         inset: auto;
         width: 340px;
         max-width: 340px;
-        max-height: 660px;
+        height: min(660px, 100%);
+        max-height: 100%;
         flex: 0 0 340px;
+        margin: 0;
       }
     }
 
@@ -193,7 +202,7 @@
     html.embedded, html.embedded body { width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0; overflow: hidden; background: transparent; }
     html.embedded body > .relative { position: fixed; top: 8px; right: 8px; width: 736px; height: auto; margin: 0; display: flex; align-items: flex-start; justify-content: flex-end; gap: 16px; transform: scale(1.27); transform-origin: top right; }
     html.embedded body > .relative > .mac-window.w-\[380px\] { width: 380px; height: 580px; max-width: 380px; flex: 0 0 380px; }
-    html.embedded body > .relative > #inspector-panel { width: 340px; max-width: 340px; max-height: 580px; flex: 0 0 340px; }
+    html.embedded body > .relative > #inspector-panel { width: 340px; height: 580px; max-width: 340px; max-height: 580px; flex: 0 0 340px; }
 
     .inspector-enter {
       animation: inspector-panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -206,9 +215,9 @@
 
     /* Keep inspector context visible while its detail content scrolls. */
     #inspector-nav {
-      position: sticky;
-      top: -1px;
+      position: relative;
       z-index: 5;
+      flex: 0 0 auto;
       margin: -16px -16px 0;
       padding: 16px 16px 10px;
       background: rgba(23, 22, 28, 0.94);
@@ -216,6 +225,22 @@
       backdrop-filter: blur(24px) saturate(180%);
       -webkit-backdrop-filter: blur(24px) saturate(180%);
     }
+
+    #inspector-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+      margin: 0 -16px;
+      padding: 16px;
+    }
+
+    #inspector-footer { flex: 0 0 auto; padding-top: 10px; }
+
+    :where(button, [tabindex="0"]) { min-height: 28px; }
+    .item-title { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .item-secondary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     .view-panel.panel-enter {
       animation: main-panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -273,18 +298,20 @@
   <div id="pipo-shell" class="relative flex gap-4 items-start max-w-5xl w-full justify-center">
 
     <!-- LEFT SIDE INSPECTOR PANEL (Opens always to the LEFT) -->
-    <div id="inspector-panel" class="mac-window w-[340px] rounded-2xl p-4 hidden flex-col justify-between text-xs transition-all duration-300 animate-fade-in relative z-10 max-h-[580px] custom-scroll overflow-y-auto">
-      <div class="space-y-4">
+    <div id="inspector-panel" role="region" aria-labelledby="inspector-title" aria-hidden="true" class="mac-window w-[340px] rounded-2xl p-4 hidden flex-col text-xs transition-all duration-300 animate-fade-in relative z-10 max-h-[580px]">
         <!-- Inspector Navigation Header -->
         <div id="inspector-nav" class="flex items-center justify-between border-b border-white/10 pb-2.5">
-          <button class="text-neutral-400 hover:text-white flex items-center gap-1 text-[11px] font-medium transition">
+          <button id="inspector-back" type="button" aria-label="Back to dashboard" class="text-neutral-400 hover:text-white flex items-center gap-1 text-[11px] font-medium transition">
             <i class="fa-solid fa-chevron-left text-[9px]"></i>
             <span id="inspector-category">Course</span>
           </button>
-          <button aria-label="Close details" class="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-white/10 transition">
+          <button id="inspector-close" type="button" aria-label="Close details" class="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-white/10 transition">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
+
+      <div id="inspector-scroll" class="custom-scroll">
+       <div class="space-y-4">
 
         <!-- Course Header Info -->
         <div id="inspector-course-header" class="space-y-2">
@@ -337,23 +364,25 @@
 
         <!-- Assignments List in Inspector -->
         <div id="inspector-assignments-block" class="hidden space-y-2 pt-1">
-          <button type="button" data-collapse-target="assignments" aria-expanded="true" class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs">
+          <button type="button" data-collapse-target="activities" aria-controls="inspector-activities-content" aria-expanded="true" class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs">
             <span class="flex items-center gap-1.5">
               <i class="fa-regular fa-file-lines text-[11px]"></i>
-              Assignments
+              Upcoming activities
             </span>
             <i class="fa-solid fa-chevron-up text-[10px] text-neutral-500"></i>
           </button>
 
-          <div class="space-y-1.5" data-course-assignments></div>
-          <div class="hidden mac-card rounded-lg p-2 text-xs text-neutral-400" data-course-assignments-empty>
-            No upcoming assignments.
+          <div id="inspector-activities-content" class="space-y-1.5">
+            <div class="space-y-1.5" data-course-assignments></div>
+            <div class="hidden mac-card rounded-lg p-2 text-xs text-neutral-400" data-course-assignments-empty>
+              No upcoming activities.
+            </div>
           </div>
         </div>
 
         <!-- Published Grades Block -->
         <div id="inspector-grades-block" class="hidden space-y-1.5 pt-2">
-          <button type="button" data-collapse-target="grades" aria-expanded="true" class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs">
+          <button type="button" data-collapse-target="grades" aria-controls="inspector-grades-content" aria-expanded="true" class="w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs">
             <span class="flex items-center gap-1.5">
               <i class="fa-regular fa-circle-check text-[11px]"></i>
               Published grades
@@ -361,8 +390,10 @@
             <i class="fa-solid fa-chevron-up text-[10px] text-neutral-500"></i>
           </button>
 
-          <div class="space-y-1 text-xs" data-course-grades></div>
-          <div class="hidden mac-card rounded-lg p-2 text-xs text-neutral-400" data-course-grades-empty>No published grades.</div>
+          <div id="inspector-grades-content" class="space-y-1 text-xs">
+            <div class="space-y-1" data-course-grades></div>
+            <div class="hidden mac-card rounded-lg p-2 text-xs text-neutral-400" data-course-grades-empty>No published grades.</div>
+          </div>
         </div>
 
         <!-- Quick Actions Grid -->
@@ -383,9 +414,10 @@
             </button>
           </div>
         </div>
+       </div>
       </div>
 
-      <div class="pt-4 border-t border-white/10 text-[10px] text-neutral-500 flex items-center justify-between">
+      <div id="inspector-footer" class="pt-4 border-t border-white/10 text-[10px] text-neutral-500 flex items-center justify-between">
         <span>Session-only controls</span>
         <button class="text-rose-400 hover:underline font-medium">Snooze reminder</button>
       </div>
@@ -445,7 +477,7 @@
               </div>
             </div>
 
-            <div class="pt-2 space-y-0.5">
+            <div id="category-filters" class="pt-2 space-y-0.5">
               <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-200 text-xs">All Activity Types</button>
               <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Assignments</button>
               <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Announcements</button>
@@ -459,7 +491,7 @@
       <!-- MAIN CONTENT VIEW CANVAS -->
 
       <!-- VIEW 1: TODAY TAB -->
-      <div id="view-today" class="view-panel custom-scroll overflow-y-auto px-3.5 space-y-3 py-3 h-[480px]">
+      <div id="view-today" role="tabpanel" aria-labelledby="tab-today" class="view-panel custom-scroll overflow-y-auto px-3.5 space-y-3 py-3">
 
         <!-- User Greeting Header -->
         <div class="pt-0.5 flex items-center justify-between">
@@ -556,13 +588,13 @@
       </div>
 
       <!-- VIEW 2: COURSES TAB -->
-      <div id="view-courses" class="view-panel hidden custom-scroll overflow-y-auto px-3.5 space-y-2 py-3 h-[480px]">
+      <div id="view-courses" role="tabpanel" aria-labelledby="tab-courses" class="view-panel hidden custom-scroll overflow-y-auto px-3.5 space-y-2 py-3">
         <div class="mac-card rounded-xl p-3 text-xs text-neutral-400">No courses available</div>
 
       </div>
 
       <!-- VIEW 3: SETTINGS TAB (FULL ACCORDING TO USER SCREENSHOTS) -->
-      <div id="view-settings" class="view-panel hidden custom-scroll overflow-y-auto px-3.5 space-y-3.5 py-3 h-[480px]">
+      <div id="view-settings" role="tabpanel" aria-labelledby="tab-settings" class="view-panel hidden custom-scroll overflow-y-auto px-3.5 space-y-3.5 py-3">
 
         <!-- Connection Section -->
         <div class="space-y-1.5">
@@ -728,19 +760,22 @@
 
       <!-- APPLE-STYLE SEGMENTED NAVIGATION FOOTER -->
       <nav id="main-navigation" aria-label="Primary" class="border-t border-white/10 bg-white/[0.02] flex justify-center backdrop-blur-md">
-        <div class="mac-segmented p-0.5 rounded-xl flex items-center text-xs w-full max-w-[280px]">
+        <div role="tablist" aria-label="Pipo sections" class="mac-segmented p-0.5 rounded-xl grid grid-cols-3 items-center text-xs w-full">
           <button
             id="tab-today"
+            type="button" role="tab" aria-controls="view-today" aria-selected="true" tabindex="0"
             class="mac-segmented-btn active flex-1 py-1.5 rounded-lg text-center transition">
             <i class="fa-regular fa-calendar-check" aria-hidden="true"></i><span>Today</span>
           </button>
           <button
             id="tab-courses"
+            type="button" role="tab" aria-controls="view-courses" aria-selected="false" tabindex="-1"
             class="mac-segmented-btn flex-1 py-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 font-medium text-center transition">
             <i class="fa-solid fa-book-open" aria-hidden="true"></i><span>Courses</span>
           </button>
           <button
             id="tab-settings"
+            type="button" role="tab" aria-controls="view-settings" aria-selected="false" tabindex="-1"
             class="mac-segmented-btn flex-1 py-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 font-medium text-center transition">
             <i class="fa-solid fa-gear" aria-hidden="true"></i><span>Settings</span>
           </button>
@@ -748,7 +783,7 @@
       </nav>
 
       <!-- TOAST NOTIFICATION -->
-      <div id="toast" role="status" aria-live="polite" class="absolute bottom-[58px] left-1/2 -translate-x-1/2 mac-popover px-4 py-2 rounded-full text-xs font-medium text-white border border-white/20 shadow-2xl transition-all duration-300 opacity-0 translate-y-4 pointer-events-none z-50 flex items-center gap-2 whitespace-nowrap">
+      <div id="toast" role="status" aria-live="polite" class="absolute bottom-[58px] left-1/2 -translate-x-1/2 mac-popover px-4 py-2 rounded-full text-xs font-medium text-white border border-white/20 shadow-2xl transition-all duration-300 opacity-0 translate-y-4 pointer-events-none z-[90] flex items-center gap-2 whitespace-nowrap">
         <i class="fa-solid fa-circle-info text-rose-400"></i>
         <span id="toast-message">Notification</span>
       </div>
@@ -756,7 +791,7 @@
     </div>
 
     <!-- ITEM CONTEXT ACTION POPOVER -->
-    <div id="item-context-menu" class="hidden absolute mac-popover rounded-xl w-48 p-1.5 z-50 text-xs space-y-0.5 shadow-2xl">
+    <div id="item-context-menu" role="menu" aria-label="Item actions" class="hidden absolute mac-popover rounded-xl w-48 p-1.5 z-50 text-xs space-y-0.5 shadow-2xl">
       <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
         <span>Open LMS</span>
         <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-neutral-400"></i>

@@ -16,6 +16,7 @@ public final class PipoModel {
     }
     public private(set) var authenticationError: String?
     public private(set) var localState = PipoLocalState()
+    public private(set) var latestRefreshMetrics: PipoRefreshMetrics?
 
     private let transport: any PipoSidecarTransport
     private let tokenStore: any PipoTokenStore
@@ -33,7 +34,8 @@ public final class PipoModel {
     @ObservationIgnored private var rawSnapshot: DashboardSnapshot?
     @ObservationIgnored private var sessionToken: String?
     @ObservationIgnored private var hasLoadedStoredToken = false
-    @ObservationIgnored private var isRefreshing = false
+    @ObservationIgnored private var courseCache: [Int: (detail: CourseDetail, loadedAt: Date)] = [:]
+    @ObservationIgnored private var courseLoads: [Int: Task<CourseDetail, Error>] = [:]
 
     public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, secureVault: KeychainSecureVault? = nil, refreshCoordinator: DashboardRefreshCoordinator, localStateStore: EncryptedLocalStateStore? = nil, settings: PipoSettings = PipoSettings(), notificationService: any PipoNotificationService = PipoSystemNotifications(), calendarService: any PipoCalendarService = PipoEventKitCalendar(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
         self.transport = transport
@@ -82,11 +84,12 @@ public final class PipoModel {
             cache = InMemoryDashboardCache()
             localStateStore = nil
         }
+        let sidecar = PipoCoreProcessTransport()
         return PipoModel(
-            transport: PipoCoreProcessTransport(),
+            transport: sidecar,
             tokenStore: vault,
             secureVault: vault,
-            refreshCoordinator: DashboardRefreshCoordinator(transport: PipoCoreProcessTransport(), cache: cache),
+            refreshCoordinator: DashboardRefreshCoordinator(transport: sidecar, cache: cache),
             localStateStore: localStateStore,
             settings: settings
         )
@@ -105,7 +108,13 @@ public final class PipoModel {
                 )
                 try? await Task.sleep(for: .seconds(interval))
                 guard !Task.isCancelled else { return }
-                await self.refresh(force: true)
+                if let rawSnapshot = self.rawSnapshot {
+                    let sections = await self.refreshCoordinator.sectionsNeedingRefresh(in: rawSnapshot, settings: self.settings)
+                    guard !sections.isEmpty else { continue }
+                    await self.refresh(force: true, sections: sections)
+                } else {
+                    await self.refresh(force: true)
+                }
             }
         }
     }
@@ -117,10 +126,16 @@ public final class PipoModel {
             rawSnapshot = cached
             snapshot = cached.applyingLocalState(localState)
             phase = .offline
+            let stale = await refreshCoordinator.sectionsNeedingRefresh(in: cached, settings: settings)
+            guard !stale.isEmpty else {
+                phase = .ready
+                return
+            }
+            await refresh(using: token, force: true, sections: stale)
         } else {
             phase = .loading
+            await refresh(using: token, force: true)
         }
-        await refresh(using: token, force: false)
     }
 
     public func signIn(username: String, password: String) async {
@@ -134,6 +149,7 @@ public final class PipoModel {
             updateSecureStorageStatus()
             sessionToken = token
             hasLoadedStoredToken = true
+            invalidateCourseCache()
             await refresh(using: token, force: true)
         } catch {
             fail(error)
@@ -150,6 +166,7 @@ public final class PipoModel {
             updateSecureStorageStatus()
             sessionToken = token
             hasLoadedStoredToken = true
+            invalidateCourseCache()
             await refresh(using: token, force: true)
         } catch {
             fail(error)
@@ -174,13 +191,32 @@ public final class PipoModel {
     }
 
     public func loadCourse(id: Int) async throws -> CourseDetail {
+        if let cached = courseCache[id], Date().timeIntervalSince(cached.loadedAt) < 300 {
+            return cached.detail
+        }
+        if let existing = courseLoads[id] { return try await existing.value }
         guard let token = storedToken() else { throw PipoCoreError.operationFailed("Sign in to load this course.") }
-        let response = try await transport.send(SidecarRequest(
-            method: "load_course",
-            params: ["token": .string(token), "course_id": .number(id)]
-        ))
-        guard let result = response.result else { throw PipoCoreError.invalidResponse }
-        return try JSONDecoder().decode(CourseDetail.self, from: result.encodedData())
+        let transport = transport
+        let task = Task<CourseDetail, Error> {
+            let response = try await transport.send(SidecarRequest(
+                method: "load_course",
+                params: ["token": .string(token), "course_id": .number(id)]
+            ))
+            guard let result = response.result else { throw PipoCoreError.invalidResponse }
+            return try JSONDecoder().decode(CourseDetail.self, from: result.encodedData())
+        }
+        courseLoads[id] = task
+        defer { courseLoads[id] = nil }
+        let detail = try await task.value
+        courseCache[id] = (detail, Date())
+        return detail
+    }
+
+    public func courseDestination(id: Int) async throws -> URL {
+        guard id > 0,
+              snapshot?.courses.contains(where: { $0.id == id }) == true || courseCache[id] != nil
+        else { throw PipoCoreError.operationFailed("Course destination is unavailable.") }
+        return try DestinationPolicy.resolve("/course/view.php?id=\(id)")
     }
 
     public func signOut() async {
@@ -198,6 +234,7 @@ public final class PipoModel {
         snapshot = nil
         rawSnapshot = nil
         refreshDate = nil
+        latestRefreshMetrics = nil
         authenticationError = nil
         hasRequestedNotificationAccess = false
         consecutiveRefreshFailures = 0
@@ -205,6 +242,9 @@ public final class PipoModel {
         phase = .signedOut
         selectedTab = .dashboard
         localState = PipoLocalState()
+        courseLoads.values.forEach { $0.cancel() }
+        courseLoads.removeAll()
+        courseCache.removeAll()
         sessionToken = nil
         hasLoadedStoredToken = true
         updateSecureStorageStatus()
@@ -263,7 +303,7 @@ public final class PipoModel {
 
     public func diagnostics() -> PipoDiagnostics? {
         guard let snapshot else { return nil }
-        return PipoDiagnostics(snapshot: snapshot)
+        return PipoDiagnostics(snapshot: snapshot, refreshMetrics: latestRefreshMetrics)
     }
 
     public func clearCache() async {
@@ -272,21 +312,26 @@ public final class PipoModel {
             snapshot = nil
             rawSnapshot = nil
             refreshDate = nil
+            latestRefreshMetrics = nil
             phase = storedToken() == nil ? .signedOut : .offline
+            invalidateCourseCache()
         } catch { fail(error) }
     }
 
     private func refresh(using token: String, force: Bool, sections: Set<String>? = nil) async {
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
+        if force {
+            let detailSections: Set<String> = ["assignments", "grades", "announcements", "resources"]
+            if sections == nil || !detailSections.isDisjoint(with: sections ?? []) { invalidateCourseCache() }
+        }
         let previousSnapshot = snapshot
         phase = snapshot == nil ? .loading : .ready
         do {
-            let refreshed = try await refreshCoordinator.refresh(token: token, force: force, settings: settings, sections: sections)
+            let outcome = try await refreshCoordinator.refreshOutcome(token: token, force: force, settings: settings, sections: sections)
+            let refreshed = outcome.snapshot
+            latestRefreshMetrics = await refreshCoordinator.metrics()
             rawSnapshot = refreshed
             snapshot = refreshed.applyingLocalState(localState)
-            if await refreshCoordinator.lastResultUsedCache() {
+            if outcome.source == .staleCache {
                 consecutiveRefreshFailures += 1
                 phase = .offline
             } else {
@@ -322,7 +367,13 @@ public final class PipoModel {
             guard path.status == .satisfied else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.phase == .offline else { return }
-                await self.refresh(force: true)
+                if let rawSnapshot = self.rawSnapshot {
+                    let sections = await self.refreshCoordinator.sectionsNeedingRefresh(in: rawSnapshot, settings: self.settings)
+                    if !sections.isEmpty { await self.refresh(force: true, sections: sections) }
+                    else { self.phase = .ready }
+                } else {
+                    await self.refresh(force: true)
+                }
             }
         }
         monitor.start(queue: DispatchQueue(label: "com.jazztinn.pipo.network"))
@@ -387,6 +438,12 @@ public final class PipoModel {
 
     private func applyLocalState() {
         snapshot = rawSnapshot?.applyingLocalState(localState)
+    }
+
+    private func invalidateCourseCache() {
+        courseLoads.values.forEach { $0.cancel() }
+        courseLoads.removeAll()
+        courseCache.removeAll()
     }
 
     private var allDashboardItems: [DashboardItem] {

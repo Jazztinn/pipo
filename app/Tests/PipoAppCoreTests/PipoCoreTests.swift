@@ -9,6 +9,111 @@ import Testing
     #expect(snapshot.sections.newAssignments.isEmpty)
 }
 
+@Test func versionThreeModelDecodesVersionTwoCache() throws {
+    let data = Data("""
+    {"version":2,"generated_at":"2026-08-21T03:00:00Z","site_name":"LPU","student_name":"Alex","sections":{"due_soon":[],"notifications":[],"new_assignments":[],"messages":[],"grade_feedback":[]},"courses":[]}
+    """.utf8)
+    let snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: data)
+    #expect(snapshot.version == 2)
+    #expect(snapshot.sectionResults.isEmpty)
+    #expect(snapshot.result(for: "messages").status == .success)
+    #expect(sampleSnapshot().version == 3)
+}
+
+@Test func versionThreeDecodesStructuredSectionResultsAndEntityKeys() throws {
+    let data = Data("""
+    {"version":3,"generated_at":"2026-08-26T01:00:00Z","site_name":"LPU","student_name":"Alex","sections":{"due_soon":[],"notifications":[],"new_assignments":[],"messages":[{"id":9,"entity_key":"lms:/message/index.php?id=9","kind":"message","title":"Professor","course_name":"Messages","destination":"/message/index.php?id=9"}],"grade_feedback":[]},"courses":[],"section_results":{"messages":{"status":"partial","refreshed_at":"2026-08-26T01:00:00Z","error":"Messages: one course unavailable"}}}
+    """.utf8)
+    let snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: data)
+    #expect(snapshot.result(for: "messages").status == .partial)
+    #expect(snapshot.result(for: "messages").fetchedAt == "2026-08-26T01:00:00Z")
+    #expect(snapshot.sections.messages.first?.entityKey == "lms:/message/index.php?id=9")
+}
+
+@Test func stableEntityKeysDeduplicateEquivalentDestinations() {
+    let first = DashboardItem(id: "one", kind: "assignment", title: "Work", courseID: 7, courseName: "Course", destination: "/mod/assign/view.php?b=2&a=1#top")
+    let second = DashboardItem(id: "two", kind: "assignment", title: "Work", courseID: 7, courseName: "Course", destination: "/mod/assign/view.php?a=1&b=2")
+    #expect(first.stableKey == second.stableKey)
+    #expect(DashboardItem.deduplicated([first, second]) == [first])
+}
+
+@Test func failedSectionPreservesCachedCardsDuringFullRefresh() async throws {
+    let cachedMessage = DashboardItem(id: "message", kind: "message", title: "Professor", courseName: "Messages")
+    let cached = DashboardSnapshot(generatedAt: "old", siteName: "LPU", studentName: "Alex", sections: DashboardSections(messages: [cachedMessage]), courses: [])
+    let refreshed = DashboardSnapshot(generatedAt: "new", siteName: "LPU", studentName: "Alex", sections: DashboardSections(), courses: [], failures: ["messages unavailable"], sectionResults: ["messages": .failed])
+    let coordinator = DashboardRefreshCoordinator(transport: SnapshotTransport(snapshot: refreshed), cache: InMemoryDashboardCache(snapshot: cached))
+    let outcome = try await coordinator.refreshOutcome(token: "token", force: true)
+    #expect(outcome.snapshot.sections.messages == [cachedMessage])
+    #expect(outcome.preservedSections.contains("messages"))
+}
+
+@Test func successfulEmptySectionReplacesCachedCards() async throws {
+    let cachedMessage = DashboardItem(id: "message", kind: "message", title: "Professor", courseName: "Messages")
+    let cached = DashboardSnapshot(generatedAt: "old", siteName: "LPU", studentName: "Alex", sections: DashboardSections(messages: [cachedMessage]), courses: [])
+    let refreshed = DashboardSnapshot(generatedAt: "new", siteName: "LPU", studentName: "Alex", sections: DashboardSections(), courses: [], sectionResults: ["messages": .success])
+    let coordinator = DashboardRefreshCoordinator(transport: SnapshotTransport(snapshot: refreshed), cache: InMemoryDashboardCache(snapshot: cached))
+    let outcome = try await coordinator.refreshOutcome(token: "token", force: true, sections: ["messages"])
+    #expect(outcome.snapshot.sections.messages.isEmpty)
+    #expect(outcome.refreshedSections == ["messages"])
+}
+
+@Test func partialSectionPreservesCachedCards() async throws {
+    let cachedMessage = DashboardItem(id: "message", kind: "message", title: "Professor", courseName: "Messages")
+    let cached = DashboardSnapshot(generatedAt: "old", siteName: "LPU", studentName: "Alex", sections: DashboardSections(messages: [cachedMessage]), courses: [])
+    let partial = DashboardSnapshot(generatedAt: "new", siteName: "LPU", studentName: "Alex", sections: DashboardSections(messages: [DashboardItem(id: "other", kind: "message", title: "Other", courseName: "Messages")]), courses: [], sectionResults: ["messages": .partial])
+    let coordinator = DashboardRefreshCoordinator(transport: SnapshotTransport(snapshot: partial), cache: InMemoryDashboardCache(snapshot: cached))
+    let outcome = try await coordinator.refreshOutcome(token: "token", force: true, sections: ["messages"])
+    #expect(outcome.snapshot.sections.messages == [cachedMessage])
+    #expect(outcome.preservedSections == ["messages"])
+}
+
+@Test func concurrentRefreshesCoalesceToOneTransportRequest() async throws {
+    let transport = CountingSnapshotTransport(snapshot: sampleSnapshot())
+    let coordinator = DashboardRefreshCoordinator(transport: transport, cache: InMemoryDashboardCache())
+    async let first = coordinator.refreshOutcome(token: "token", force: true)
+    async let second = coordinator.refreshOutcome(token: "token", force: true)
+    let pair = try await (first, second)
+    #expect(await transport.count == 1)
+    #expect(pair.0.coalesced || pair.1.coalesced)
+}
+
+@Test func freshnessTiersOnlyRequestStaleSections() async {
+    let now = Date()
+    let formatter = ISO8601DateFormatter()
+    let snapshot = DashboardSnapshot(
+        generatedAt: formatter.string(from: now),
+        siteName: "LPU",
+        studentName: "Alex",
+        sections: DashboardSections(),
+        courses: [],
+        sectionTimestamps: [
+            "due_soon": formatter.string(from: now.addingTimeInterval(-901)),
+            "messages": formatter.string(from: now.addingTimeInterval(-60)),
+            "resources": formatter.string(from: now.addingTimeInterval(-60))
+        ]
+    )
+    let coordinator = DashboardRefreshCoordinator(transport: FailingTransport(), cache: InMemoryDashboardCache())
+    let stale = await coordinator.sectionsNeedingRefresh(in: snapshot, now: now)
+    #expect(stale.contains("due_soon"))
+    #expect(!stale.contains("messages"))
+    #expect(!stale.contains("resources"))
+}
+
+@Test @MainActor func courseDetailsUseFiveMinuteMemoryCacheAndDirectDestination() async throws {
+    let transport = CountingCourseTransport()
+    let model = PipoModel(
+        transport: transport,
+        tokenStore: TestTokenStore(token: "token"),
+        refreshCoordinator: DashboardRefreshCoordinator(transport: transport, cache: InMemoryDashboardCache()),
+        notificationService: NoopNotificationService(),
+        urlOpener: { _ in }
+    )
+    _ = try await model.loadCourse(id: 12)
+    let destination = try await model.courseDestination(id: 12)
+    #expect(await transport.count == 1)
+    #expect(destination.absoluteString == "https://lms.lpucavite.edu.ph/course/view.php?id=12")
+}
+
 @Test func staleCacheIsPreservedAfterRefreshFailure() async throws {
     let cached = sampleSnapshot()
     let cache = InMemoryDashboardCache(snapshot: cached)
@@ -43,6 +148,7 @@ import Testing
 
 @Test func sidecarRejectsMismatchedResponseIdentity() throws {
     let request = SidecarRequest(method: "resolve_destination", params: ["destination": .string("/my/")])
+    #expect(request.version == 3)
     let data = Data("{\"version\":1,\"id\":\"different\",\"result\":{\"url\":\"https://lms.lpucavite.edu.ph/my/\"}}".utf8)
     let response = try JSONDecoder().decode(SidecarResponse.self, from: data)
     #expect(throws: PipoCoreError.invalidResponse) {
@@ -354,6 +460,34 @@ private struct SnapshotTransport: PipoSidecarTransport {
     func send(_ request: SidecarRequest) async throws -> SidecarResponse {
         let value = try JSONDecoder().decode(PipoJSONValue.self, from: JSONEncoder().encode(snapshot))
         return SidecarResponse(version: request.version, id: request.id, result: value, error: nil)
+    }
+}
+
+private actor CountingSnapshotTransport: PipoSidecarTransport {
+    let snapshot: DashboardSnapshot
+    private(set) var count = 0
+    init(snapshot: DashboardSnapshot) { self.snapshot = snapshot }
+    func send(_ request: SidecarRequest) async throws -> SidecarResponse {
+        count += 1
+        try await Task.sleep(for: .milliseconds(40))
+        let value = try JSONDecoder().decode(PipoJSONValue.self, from: JSONEncoder().encode(snapshot))
+        return SidecarResponse(version: request.version, id: request.id, result: value, error: nil)
+    }
+}
+
+private actor CountingCourseTransport: PipoSidecarTransport {
+    private(set) var count = 0
+    func send(_ request: SidecarRequest) async throws -> SidecarResponse {
+        count += 1
+        let result: PipoJSONValue = .object([
+            "version": .number(2),
+            "course": .object(["id": .number(12), "name": .string("History")]),
+            "assignments": .array([]),
+            "grades": .array([]),
+            "destination": .string("/course/view.php?id=12"),
+            "failures": .array([])
+        ])
+        return SidecarResponse(version: request.version, id: request.id, result: result, error: nil)
     }
 }
 

@@ -1,6 +1,66 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import PipoUI
+
+@Test
+func menuPanelGeometryKeepsMainPaneAnchoredWhenInspectorOpens() {
+    let screen = CGRect(x: 0, y: 0, width: 1728, height: 1080)
+    let status = CGRect(x: 1200, y: 1050, width: 24, height: 24)
+    let compact = PipoMenuPanelGeometry.frame(anchoredTo: status, in: screen, inspectorVisible: false)
+    let expanded = PipoMenuPanelGeometry.frame(anchoredTo: status, in: screen, inspectorVisible: true)
+
+    let compactMainMidX = compact.midX
+    let expandedMainMidX = expanded.minX + 12 + 340 + 16 + 190
+    #expect(compact.size == PipoMenuPanelGeometry.compactSize)
+    #expect(expanded.size == PipoMenuPanelGeometry.expandedSize)
+    #expect(compactMainMidX == expandedMainMidX)
+}
+
+@Test
+func menuPanelGeometryClampsAcrossNegativeScreenCoordinates() {
+    let screen = CGRect(x: -1440, y: 0, width: 1440, height: 900)
+    let status = CGRect(x: -1438, y: 876, width: 24, height: 24)
+    let frame = PipoMenuPanelGeometry.frame(anchoredTo: status, in: screen, inspectorVisible: true)
+
+    #expect(frame.size == PipoMenuPanelGeometry.compactSize)
+    #expect(frame.minX == screen.minX)
+    #expect(frame.minY >= screen.minY)
+    #expect(frame.maxX <= screen.maxX)
+    #expect(frame.maxY <= screen.maxY)
+}
+
+@Test
+func menuPanelGeometryUsesOverlayInspectorOnNarrowScreens() {
+    let screen = CGRect(x: 0, y: 0, width: 700, height: 800)
+    let status = CGRect(x: 338, y: 776, width: 24, height: 24)
+    let frame = PipoMenuPanelGeometry.frame(anchoredTo: status, in: screen, inspectorVisible: true)
+
+    #expect(!PipoMenuPanelGeometry.usesExpandedInspector(anchoredTo: status, in: screen))
+    #expect(frame.size == PipoMenuPanelGeometry.compactSize)
+}
+
+@Test
+func menuPanelGeometryUsesOverlayWhenInspectorCannotFitLeft() {
+    let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+    let status = CGRect(x: 8, y: 876, width: 24, height: 24)
+    let compact = PipoMenuPanelGeometry.frame(anchoredTo: status, in: screen, inspectorVisible: false)
+    let attemptedExpansion = PipoMenuPanelGeometry.frame(anchoredTo: status, in: screen, inspectorVisible: true)
+
+    #expect(!PipoMenuPanelGeometry.usesExpandedInspector(anchoredTo: status, in: screen))
+    #expect(attemptedExpansion == compact)
+}
+
+@Test
+func menuPanelGeometryClampsHeightWithoutHidingNavigation() {
+    let screen = CGRect(x: 0, y: 0, width: 1440, height: 600)
+    let status = CGRect(x: 1000, y: 576, width: 24, height: 24)
+    let frame = PipoMenuPanelGeometry.frame(anchoredTo: status, in: screen, inspectorVisible: false)
+
+    #expect(frame.height == screen.height)
+    #expect(frame.minY == screen.minY)
+    #expect(frame.maxY == screen.maxY)
+}
 
 @Test
 func newAssignmentsExcludeDueSoonDuplicates() {

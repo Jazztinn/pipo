@@ -21,6 +21,12 @@ struct PipoApp: App {
                 hostMode: .window
             )
             .frame(minWidth: 736, idealWidth: 800, minHeight: 660, idealHeight: 680)
+            .onAppear {
+                appDelegate.configureMenuBar(
+                    model: model,
+                    installUpdate: updater.isConfigured ? updater.checkForUpdates : nil
+                )
+            }
             .task {
                 await model.start()
             }
@@ -28,28 +34,6 @@ struct PipoApp: App {
         .defaultSize(width: 800, height: 680)
         .windowResizability(.contentSize)
 
-        MenuBarExtra {
-            PipoRootView(
-                model: model,
-                configuration: PipoUIConfiguration(
-                    model: model,
-                    installUpdate: updater.isConfigured ? updater.checkForUpdates : nil
-                ),
-                hostMode: .menuBar
-            )
-        } label: {
-            let count = model.snapshot.map {
-                PipoDashboardRanking.urgentCount(snapshot: $0, state: model.localState)
-            } ?? 0
-            if count > 0 {
-                Label("\(count)", systemImage: "flag")
-                    .accessibilityLabel("Pipo, \(count) urgent items")
-            } else {
-                Image(systemName: "flag")
-                    .accessibilityLabel("Pipo")
-            }
-        }
-        .menuBarExtraStyle(.window)
     }
 }
 
@@ -94,7 +78,15 @@ extension Notification.Name {
 }
 
 final class PipoAppDelegate: NSObject, NSApplicationDelegate {
+    private var menuBarController: PipoMenuBarController?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+    }
+
+    @MainActor
+    func configureMenuBar(model: PipoModel, installUpdate: (@MainActor () -> Void)?) {
+        guard menuBarController == nil else { return }
+        menuBarController = PipoMenuBarController(model: model, installUpdate: installUpdate)
     }
 }

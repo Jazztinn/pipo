@@ -49,8 +49,8 @@
     { "id": "course-hogwarts", "name": "DADA 401 · Remedial Defense", "shortName": "DADA 401", "courseCode": "HOGW-DADA401", "subtitle": "Hogwarts · Autumn term", "body": "Professor Lupin · 5 upcoming activities", "publishedTotal": "94%", "upcomingCount": 5 },
     { "id": "course-middle-earth", "name": "MORD 301 · Applied Quest Logistics", "shortName": "MORD 301", "courseCode": "ME-MORD301", "subtitle": "Rivendell Extension · Third Age", "body": "Gandalf the Grey · 4 upcoming activities", "publishedTotal": "91%", "upcomingCount": 4 },
     { "id": "course-westeros", "name": "WST 410 · Governance of Westeros", "shortName": "WST 410", "courseCode": "CITA-WST410", "subtitle": "The Citadel · Long summer term", "body": "Maester Aemon · 6 upcoming activities", "publishedTotal": "88%", "upcomingCount": 6 },
-    { "id": "course-north-shore", "name": "PLST 200 · Plastics and Power", "shortName": "PLST 200", "courseCode": "NSH-PLST200", "subtitle": "North Shore High · Fall semester", "body": "Ms. Norbury · 3 upcoming activities", "publishedTotal": "96%", "upcomingCount": 3 },
-    { "id": "course-murphy", "name": "MUR 214 · Digital Identity and Letters", "shortName": "MUR 214", "courseCode": "DEH-MUR214", "subtitle": "Murphy Institute · Fall semester", "body": "Dr. Hansen · 2 upcoming activities", "publishedTotal": "97%", "upcomingCount": 2 },
+    { "id": "course-north-shore", "name": "PLST 200 · Plastics and Power", "shortName": "PLST 200", "courseCode": "NSH-PLST200", "subtitle": "North Shore High · Fall semester", "body": "Ms. Norbury · 4 upcoming activities", "publishedTotal": "96%", "upcomingCount": 4 },
+    { "id": "course-murphy", "name": "MUR 214 · Digital Identity and Letters", "shortName": "MUR 214", "courseCode": "DEH-MUR214", "subtitle": "Murphy Institute · Fall semester", "body": "Dr. Hansen · 3 upcoming activities", "publishedTotal": "97%", "upcomingCount": 3 },
     { "id": "course-elective", "name": "MYTH 101 · Swords, Songs, and Subtext", "shortName": "MYTH 101", "courseCode": "CROSS-MYTH101", "subtitle": "Cross-realm elective", "body": "Guest faculty · No upcoming work", "upcomingCount": 0 }
   ],
   "settings": {

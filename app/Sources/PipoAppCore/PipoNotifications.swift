@@ -18,9 +18,9 @@ public enum PipoNotificationPlanner {
     }
 
     public static func changes(from previous: DashboardSnapshot, to current: DashboardSnapshot, settings: PipoSettings) -> [PipoNotificationPayload] {
-        let previousIDs = Set(allItems(in: previous).map(\.id))
+        let previousIDs = Set(allItems(in: previous).map(\.stableKey))
         return allItems(in: current)
-            .filter { !previousIDs.contains($0.id) }
+            .filter { !previousIDs.contains($0.stableKey) }
             .filter { item in
                 switch item.kind {
                 case "message": settings.messageNotifications
@@ -34,12 +34,12 @@ public enum PipoNotificationPlanner {
     }
 
     private static func allItems(in snapshot: DashboardSnapshot) -> [DashboardItem] {
-        snapshot.sections.dueSoon
+        DashboardItem.deduplicated(snapshot.sections.dueSoon
             + snapshot.sections.notifications.filter(\.isUnread)
             + snapshot.sections.newAssignments
             + snapshot.sections.messages
             + snapshot.sections.gradeFeedback
-            + snapshot.announcements
+            + snapshot.announcements)
     }
 
     private static func payload(for item: DashboardItem) -> PipoNotificationPayload {
@@ -94,7 +94,7 @@ public struct PipoSystemNotifications: PipoNotificationService {
         let existing = await center.pendingNotificationRequests()
         let identifiers = existing.map(\.identifier).filter { $0.hasPrefix("deadline-") }
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
-        for item in items.prefix(30) {
+        for item in DashboardItem.deduplicated(items).prefix(30) {
             for date in PipoReminderPlanner.reminderDates(for: item, settings: settings) {
                 let content = UNMutableNotificationContent()
                 content.title = "Upcoming LMS deadline"

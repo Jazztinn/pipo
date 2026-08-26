@@ -2,14 +2,15 @@
 
 Pipo uses a versioned JSON-lines process named `pipo-core` in place of a UniFFI binding. Every request and response is one UTF-8 JSON object terminated by `\n` on standard input and standard output. The process has no HTTP listener, local socket, upload path, or mutation method.
 
-The protocol version is `1`. Supported methods are `authenticate_with_password`, `authenticate_with_token`, `discover_capabilities`, `refresh_dashboard`, `load_course`, and `resolve_destination`.
+The protocol version is `3`. Supported methods are `authenticate_with_password`, `authenticate_with_token`, `discover_capabilities`, `refresh_dashboard`, `load_course`, and `resolve_destination`. AppCore keeps one sidecar process alive, validates request IDs, and restarts it once after a transport failure.
 
 `refresh_dashboard` treats courses as the required feed. Deadlines,
-notifications, assignments, messages, and grades fail independently and
-return section failures beside usable data. Assignment IDs remain in the
-encrypted snapshot so Swift can label only first-observed assignments as new.
+notifications, assignments, messages, and grades fail independently and return
+structured section outcomes beside usable data. Assignment IDs and stable
+entity keys remain in the encrypted snapshot so Swift can label only
+first-observed assignments as new and deduplicate cross-feed items.
 
-`authenticate_with_password` exchanges the supplied password with Moodle's token endpoint once. The password is not cached by Rust or Swift. Subsequent requests supply the Keychain-backed token. Pipo only contacts `https://lms.lpucavite.edu.ph`; redirects and destinations must retain that exact origin. Response decoding is capped at 2 MiB, with a smaller cap for token exchange responses.
+`authenticate_with_password` exchanges the supplied password with Moodle's token endpoint once. The password is not cached by Rust or Swift. Subsequent requests supply the Keychain-backed token. Pipo only contacts `https://lms.lpucavite.edu.ph`; redirects and destinations must retain that exact origin. Response decoding is capped at 2 MiB, with a smaller cap for token exchange responses. Individual LMS requests time out after 20 seconds; each sidecar operation has a 60-second deadline.
 
 The Moodle request design follows the read-only portions of `ALinuxPerson/openlms-mcp` at `c5a09e9f70d56def5e26acea425d1a7dfd514503`. Pipo removed its MCP server, write methods, file transfer support, confirmations, and listener configuration.
 

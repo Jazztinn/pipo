@@ -66,7 +66,7 @@ public enum PipoDeadlineGroup: String, CaseIterable, Codable, Sendable {
 
 public enum PipoDashboardRanking {
     public static func nextUp(snapshot: DashboardSnapshot, state: PipoLocalState, now: Date = .now, calendar: Calendar = .current) -> [DashboardItem] {
-        let candidates = snapshot.sections.dueSoon + snapshot.sections.newAssignments + snapshot.schedule + snapshot.announcements
+        let candidates = DashboardItem.deduplicated(snapshot.sections.dueSoon + snapshot.sections.newAssignments + snapshot.schedule + snapshot.announcements)
         return candidates
             .filter { state.snoozedUntil[$0.id].map { $0 <= now } ?? true }
             .filter { $0.kind != "announcement" || !state.seenIDs.contains($0.id) }
@@ -98,7 +98,7 @@ public enum PipoDashboardRanking {
             .filter { state.snoozedUntil[$0.id].map { $0 <= now } ?? true }
             .filter { $0.submissionStatus != "submitted" && $0.submissionStatus != "graded" }
             .filter { date($0).map { $0 <= deadline } ?? false }
-            .map(\.id)).count
+            .map(\.stableKey)).count
     }
 
     private static func rank(_ item: DashboardItem, state: PipoLocalState, now: Date, calendar: Calendar) -> (Int, Date, String) {
@@ -141,7 +141,9 @@ public extension DashboardSnapshot {
             schedule: schedule,
             announcements: announcements,
             resources: resources,
-            sectionTimestamps: sectionTimestamps
+            sectionTimestamps: sectionTimestamps,
+            sectionResults: sectionResults,
+            syncDiagnostics: syncDiagnostics
         )
     }
 }
@@ -204,14 +206,24 @@ public struct PipoDiagnostics: Codable, Equatable, Sendable {
     public let failures: [String]
     public let generatedAt: String
     public let sectionTimestamps: [String: String]
+    public let sectionOutcomes: [String: String]
+    public let lmsCallCount: Int
+    public let durationMilliseconds: Int?
+    public let dataSource: String?
+    public let timeoutCount: Int
 
-    public init(snapshot: DashboardSnapshot, appVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev", macOSVersion: String = ProcessInfo.processInfo.operatingSystemVersionString) {
+    public init(snapshot: DashboardSnapshot, refreshMetrics: PipoRefreshMetrics? = nil, appVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev", macOSVersion: String = ProcessInfo.processInfo.operatingSystemVersionString) {
         self.appVersion = appVersion
         self.macOSVersion = macOSVersion
         supported = snapshot.supported
         failures = snapshot.failures
         generatedAt = snapshot.generatedAt
         sectionTimestamps = snapshot.sectionTimestamps
+        sectionOutcomes = snapshot.sectionResults.mapValues { $0.status.rawValue }
+        lmsCallCount = snapshot.syncDiagnostics.lmsCallCount
+        durationMilliseconds = refreshMetrics?.durationMilliseconds
+        dataSource = refreshMetrics?.source.rawValue
+        timeoutCount = snapshot.sectionResults.values.filter { $0.error?.localizedCaseInsensitiveContains("timed out") == true }.count
     }
 
     public func encoded() throws -> Data { try JSONEncoder().encode(self) }
