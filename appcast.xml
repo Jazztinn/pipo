@@ -3,6 +3,16 @@
     <channel>
         <title>Pipo</title>
         <item>
+            <title>0.4.9</title>
+            <pubDate>Wed, 26 Aug 2026 12:49:55 +0000</pubDate>
+            <link>https://github.com/Jazztinn/pipo</link>
+            <sparkle:version>17</sparkle:version>
+            <sparkle:shortVersionString>0.4.9</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/Jazztinn/pipo/releases/download/v0.4.9/Pipo-0.4.9-arm64.dmg" length="6988823" type="application/octet-stream" sparkle:edSignature="b2mirxTs3ax4AhhySr8IwDntc84Go92oQjkwgz5jNBMsoJMLtAUnkrkm0KUKJvLdBZvnElPQsoINkKl260tXDQ=="/>
+        </item>
+        <item>
             <title>0.4.8</title>
             <pubDate>Wed, 26 Aug 2026 11:41:46 +0000</pubDate>
             <link>https://github.com/Jazztinn/pipo</link>
@@ -21,16 +31,6 @@
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/Jazztinn/pipo/releases/download/v0.4.7/Pipo-0.4.7-arm64.dmg" length="6981659" type="application/octet-stream" sparkle:edSignature="WlxPe/U6+Wnwbi6+YiLOd6lTs0WTTQeEOFmadWM9fcCeEfGSi5k9Y8I28cq9bAlc2wFJStexeV1X9sJMN6QzBw=="/>
-        </item>
-        <item>
-            <title>0.4.6</title>
-            <pubDate>Wed, 26 Aug 2026 10:14:53 +0000</pubDate>
-            <link>https://github.com/Jazztinn/pipo</link>
-            <sparkle:version>14</sparkle:version>
-            <sparkle:shortVersionString>0.4.6</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/Jazztinn/pipo/releases/download/v0.4.6/Pipo-0.4.6-arm64.dmg" length="6981321" type="application/octet-stream" sparkle:edSignature="HYj7WnrIxedSxQsEBefsYevnbgqxQkn5f1SXkpgcmmElQX2aSthCiF17gyZBVfSwLVAAgIRBmnvXi1JXjJkBBA=="/>
         </item>
     </channel>
 </rss>
