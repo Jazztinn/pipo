@@ -339,7 +339,7 @@ public struct DashboardSections: Codable, Equatable, Sendable {
     }
 
     private func privacyItem(_ item: DashboardItem) -> DashboardItem {
-        DashboardItem(id: item.id, entityKey: item.entityKey, kind: item.kind, title: item.title, courseID: item.courseID, courseName: item.courseName, timestamp: item.timestamp, isUnread: item.isUnread, destination: item.destination, submissionStatus: item.submissionStatus, resourceKind: item.resourceKind, section: item.section)
+        DashboardItem(id: item.id, entityKey: item.entityKey, kind: item.kind, title: item.title, courseID: item.courseID, courseName: item.courseName, instructor: item.instructor, timestamp: item.timestamp, isUnread: item.isUnread, destination: item.destination, submissionStatus: item.submissionStatus, resourceKind: item.resourceKind, section: item.section)
     }
 
     enum CodingKeys: String, CodingKey { case dueSoon = "due_soon", notifications, newAssignments = "new_assignments", messages, gradeFeedback = "grade_feedback" }
@@ -352,6 +352,7 @@ public struct DashboardItem: Codable, Equatable, Sendable, Identifiable {
     public let title: String
     public let courseID: Int?
     public let courseName: String
+    public let instructor: String?
     public let timestamp: String?
     public let isUnread: Bool
     public let destination: String
@@ -361,13 +362,14 @@ public struct DashboardItem: Codable, Equatable, Sendable, Identifiable {
     public let resourceKind: String?
     public let section: String?
 
-    public init(id: String, entityKey: String? = nil, kind: String, title: String, courseID: Int? = nil, courseName: String, timestamp: String? = nil, isUnread: Bool = false, destination: String = "", detail: String? = nil, excerpt: String? = nil, submissionStatus: String? = nil, resourceKind: String? = nil, section: String? = nil) {
+    public init(id: String, entityKey: String? = nil, kind: String, title: String, courseID: Int? = nil, courseName: String, instructor: String? = nil, timestamp: String? = nil, isUnread: Bool = false, destination: String = "", detail: String? = nil, excerpt: String? = nil, submissionStatus: String? = nil, resourceKind: String? = nil, section: String? = nil) {
         self.id = id
         self.entityKey = entityKey?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? Self.fallbackEntityKey(id: id, kind: kind, courseID: courseID, courseName: courseName, destination: destination, timestamp: timestamp, title: title)
         self.kind = kind
         self.title = title
         self.courseID = courseID
         self.courseName = courseName
+        self.instructor = instructor?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         self.timestamp = timestamp
         self.isUnread = isUnread
         self.destination = destination
@@ -416,7 +418,7 @@ public struct DashboardItem: Codable, Equatable, Sendable, Identifiable {
         return (components.string ?? destination).lowercased()
     }
 
-    enum CodingKeys: String, CodingKey { case id, entityKey = "entity_key", kind, title, courseID = "course_id", courseName = "course_name", timestamp, isUnread = "is_unread", destination, detail, message, feedback, excerpt, submissionStatus = "submission_status", resourceKind = "resource_kind", section }
+    enum CodingKeys: String, CodingKey { case id, entityKey = "entity_key", kind, title, courseID = "course_id", courseName = "course_name", instructor, timestamp, isUnread = "is_unread", destination, detail, message, feedback, excerpt, submissionStatus = "submission_status", resourceKind = "resource_kind", section }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -435,6 +437,7 @@ public struct DashboardItem: Codable, Equatable, Sendable, Identifiable {
         title = decodedTitle
         courseID = decodedCourseID
         courseName = decodedCourseName
+        instructor = try container.decodeIfPresent(String.self, forKey: .instructor)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         timestamp = decodedTimestamp
         isUnread = try container.decodeIfPresent(Bool.self, forKey: .isUnread) ?? false
         destination = decodedDestination
@@ -454,6 +457,7 @@ public struct DashboardItem: Codable, Equatable, Sendable, Identifiable {
         try container.encode(title, forKey: .title)
         try container.encodeIfPresent(courseID, forKey: .courseID)
         try container.encode(courseName, forKey: .courseName)
+        try container.encodeIfPresent(instructor, forKey: .instructor)
         try container.encodeIfPresent(timestamp, forKey: .timestamp)
         try container.encode(isUnread, forKey: .isUnread)
         try container.encode(destination, forKey: .destination)
@@ -469,24 +473,27 @@ public struct Course: Codable, Equatable, Sendable, Identifiable {
     public let id: Int
     public let name: String
     public let shortName: String?
+    public let instructor: String?
     public let publishedTotal: String?
     public let upcomingCount: Int
 
-    public init(id: Int, name: String, shortName: String? = nil, publishedTotal: String? = nil, upcomingCount: Int = 0) {
+    public init(id: Int, name: String, shortName: String? = nil, instructor: String? = nil, publishedTotal: String? = nil, upcomingCount: Int = 0) {
         self.id = id
         self.name = name
         self.shortName = shortName
+        self.instructor = instructor?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         self.publishedTotal = publishedTotal
         self.upcomingCount = upcomingCount
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, shortName = "short_name", publishedTotal = "published_total", upcomingCount = "upcoming_count" }
+    enum CodingKeys: String, CodingKey { case id, name, shortName = "short_name", instructor, publishedTotal = "published_total", upcomingCount = "upcoming_count" }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int.self, forKey: .id)
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Course"
         shortName = try container.decodeIfPresent(String.self, forKey: .shortName)
+        instructor = try container.decodeIfPresent(String.self, forKey: .instructor)?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         publishedTotal = try container.decodeIfPresent(String.self, forKey: .publishedTotal)
         upcomingCount = try container.decodeIfPresent(Int.self, forKey: .upcomingCount) ?? 0
     }

@@ -7,7 +7,7 @@ const websiteRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(websiteRoot, "..");
 const source = resolve(repoRoot, "app/Sources/PipoUI/Resources/MenuWeb");
 const target = resolve(websiteRoot, "public/pipo-menu");
-const files = ["index.html", "menu.css", "menu.js", "demo-fixture.json", "pipoclick.mp3"];
+const files = ["index.html", "menu.css", "menu.js", "menu-helpers.js", "demo-fixture.json", "pipoclick.mp3"];
 const hashFiles = [...files, "css/fontawesome.min.css", "webfonts/fa-regular-400.woff2", "webfonts/fa-solid-900.woff2"];
 
 async function bundleHash() {

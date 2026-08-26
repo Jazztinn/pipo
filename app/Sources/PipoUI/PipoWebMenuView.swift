@@ -9,7 +9,7 @@ public enum PipoWebMenuHostMode: String, Codable, Sendable {
 
 struct PipoWebMenuItemV2: Codable, Sendable {
     let id, entityKey, kind, title: String
-    let courseID, courseKey, courseName, timestampISO: String?
+    let courseID, courseKey, courseName, instructor, timestampISO: String?
     let sourceLabel, presentationLabel: String
     let isUnread: Bool
     let destinationAvailable: Bool
@@ -17,9 +17,10 @@ struct PipoWebMenuItemV2: Codable, Sendable {
     let detailStatus: String
     let submissionStatus, resourceKind, section: String?
 
-    init(_ item: DashboardItem, cached: Bool) {
+    init(_ item: DashboardItem, cached: Bool, courseInstructor: String? = nil) {
         id = item.id; entityKey = item.entityKey; kind = item.kind; title = item.title
         courseID = item.courseID.map(String.init); courseKey = item.courseID.map { "course:\($0)" }; courseName = item.courseName.isEmpty ? nil : item.courseName
+        instructor = item.instructor ?? courseInstructor
         timestampISO = item.timestamp; isUnread = item.isUnread; destinationAvailable = !item.destination.isEmpty
         sourceLabel = Self.label(item.section ?? item.kind); presentationLabel = Self.label(item.kind)
         detail = item.detail ?? item.excerpt
@@ -35,9 +36,9 @@ struct PipoWebMenuItemV2: Codable, Sendable {
 struct PipoWebMenuCourseV2: Codable, Sendable {
     let id: String
     let name: String
-    let shortName, publishedTotal: String?
+    let shortName, instructor, publishedTotal: String?
     let upcomingCount: Int
-    init(_ course: Course) { id = String(course.id); name = course.name; shortName = course.shortName; publishedTotal = course.publishedTotal; upcomingCount = course.upcomingCount }
+    init(_ course: Course) { id = String(course.id); name = course.name; shortName = course.shortName; instructor = course.instructor; publishedTotal = course.publishedTotal; upcomingCount = course.upcomingCount }
 }
 
 struct PipoWebMenuSectionStatusV2: Codable, Sendable {
@@ -416,7 +417,20 @@ struct PipoWebMenuView: NSViewRepresentable {
             let settings = model.settings
             let cached = phase.name == "offline"
             let source = cached ? "offlineCache" : "live"
-            let item: (DashboardItem) -> PipoWebMenuItemV2 = { PipoWebMenuItemV2($0, cached: cached) }
+            let courses = snapshot?.courses ?? []
+            let instructorsByID = courses.reduce(into: [Int: String]()) { result, course in
+                if let instructor = course.instructor { result[course.id] = instructor }
+            }
+            let instructorsByName = courses.reduce(into: [String: String]()) { result, course in
+                if let instructor = course.instructor {
+                    result[course.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = instructor
+                }
+            }
+            let item: (DashboardItem) -> PipoWebMenuItemV2 = { dashboardItem in
+                let nameKey = dashboardItem.courseName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let courseInstructor = dashboardItem.courseID.flatMap { instructorsByID[$0] } ?? instructorsByName[nameKey]
+                return PipoWebMenuItemV2(dashboardItem, cached: cached, courseInstructor: courseInstructor)
+            }
             let statuses = Self.sectionStatuses(snapshot: snapshot, phase: phase.name, source: source)
             return PipoWebMenuStateV2(
                 version: 2,
@@ -432,7 +446,7 @@ struct PipoWebMenuView: NSViewRepresentable {
                 nextUp: (snapshot?.nextUp ?? []).map(item), schedule: (snapshot?.schedule ?? []).map(item), dueSoon: (snapshot?.sections.dueSoon ?? []).map(item),
                 newAssignments: (snapshot?.sections.newAssignments ?? []).map(item), notifications: (snapshot?.sections.notifications ?? []).map(item),
                 messages: (snapshot?.sections.messages ?? []).map(item), gradeFeedback: (snapshot?.sections.gradeFeedback ?? []).map(item),
-                announcements: (snapshot?.announcements ?? []).map(item), resources: (snapshot?.resources ?? []).map(item), courses: (snapshot?.courses ?? []).map(PipoWebMenuCourseV2.init),
+                announcements: (snapshot?.announcements ?? []).map(item), resources: (snapshot?.resources ?? []).map(item), courses: courses.map(PipoWebMenuCourseV2.init),
                 failures: snapshot?.failures ?? [], supported: snapshot?.supported,
                 settings: .init(
                     refreshMinutes: Int(settings.refreshInterval / 60), notificationsEnabled: settings.notificationsEnabled,

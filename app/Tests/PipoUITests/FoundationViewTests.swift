@@ -20,6 +20,47 @@ func menuPanelGeometryKeepsMainPaneAnchoredWhenInspectorOpens() {
 }
 
 @Test
+func menuPanelGeometryKeepsMainPaneStableAcrossInspectorRoundTrip() {
+    let screen = CGRect(x: 0, y: 0, width: 1728, height: 1080)
+    let status = CGRect(x: 1640, y: 1050, width: 64, height: 24)
+    let compactBefore = PipoMenuPanelGeometry.frame(anchoredTo: status, in: screen, inspectorVisible: false)
+    let expanded = PipoMenuPanelGeometry.frame(anchoredTo: status, in: screen, inspectorVisible: true)
+    let compactAfter = PipoMenuPanelGeometry.frame(anchoredTo: status, in: screen, inspectorVisible: false)
+
+    let beforeMain = PipoMenuPanelGeometry.mainPaneFrame(in: compactBefore, inspectorVisible: false)
+    let expandedMain = PipoMenuPanelGeometry.mainPaneFrame(in: expanded, inspectorVisible: true)
+    let afterMain = PipoMenuPanelGeometry.mainPaneFrame(in: compactAfter, inspectorVisible: false)
+    #expect(beforeMain == expandedMain)
+    #expect(expandedMain == afterMain)
+    #expect(beforeMain.width == 380)
+}
+
+@Test
+@MainActor
+func menuHostWidthIsFixedForOpenSession() {
+    let layout = PipoMenuHostLayout()
+    #expect(layout.width == 420)
+    layout.usesWideHost = true
+    let openSessionWidth = layout.width
+    #expect(openSessionWidth == 760)
+    // Inspector visibility is intentionally absent from host layout state.
+    #expect(layout.width == openSessionWidth)
+}
+
+@Test
+func webMenuItemUsesCourseInstructorWhenActivityFieldIsMissing() {
+    let activity = DashboardItem(
+        id: "assignment:12:9",
+        kind: "assignment",
+        title: "Essay",
+        courseID: 12,
+        courseName: "History of Magic"
+    )
+    let item = PipoWebMenuItemV2(activity, cached: false, courseInstructor: "Professor McGonagall")
+    #expect(item.instructor == "Professor McGonagall")
+}
+
+@Test
 func menuPanelGeometryClampsAcrossNegativeScreenCoordinates() {
     let screen = CGRect(x: -1440, y: 0, width: 1440, height: 900)
     let status = CGRect(x: -1438, y: 876, width: 24, height: 24)

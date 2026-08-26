@@ -6,6 +6,7 @@
   <title>Pipo - macOS Menu Bar App</title>
   <link rel="stylesheet" href="./menu.css">
   <link rel="stylesheet" href="./css/fontawesome.min.css">
+  <script src="./menu-helpers.js" defer></script>
   <script src="./menu.js" defer></script>
   <style>
     html,
@@ -511,7 +512,7 @@
 
         <!-- User Greeting Header -->
         <div class="pt-0.5 flex items-center justify-between">
-          <h2 class="text-sm font-bold text-white tracking-tight">Hello</h2>
+          <h2 id="today-greeting" class="text-sm font-bold text-white tracking-tight">Good day</h2>
         </div>
 
         <!-- 1. Up Next Section with Task Placeholders -->

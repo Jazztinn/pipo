@@ -8,6 +8,7 @@ import SwiftUI
 final class PipoMenuBarController: NSObject, NSWindowDelegate {
     private let model: PipoModel
     private let installUpdate: (@MainActor () -> Void)?
+    private let menuHostLayout = PipoMenuHostLayout()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let panel = PipoMenuPanel(
         contentRect: CGRect(origin: .zero, size: PipoMenuPanelGeometry.compactSize),
@@ -20,6 +21,7 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
     private var localEventMonitor: Any?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var motionTask: Task<Void, Never>?
+    private var wideHostForSession = false
     private var visibility: Visibility = .hidden
 
     private enum Visibility { case hidden, showing, shown, hiding }
@@ -68,6 +70,7 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
             model: model,
             configuration: PipoUIConfiguration(model: model, installUpdate: installUpdate),
             hostMode: .menuBar,
+            menuHostLayout: menuHostLayout,
             onMenuInspectorVisibilityChanged: { [weak self] visible in
                 self?.setInspectorVisible(visible) ?? false
             },
@@ -76,6 +79,9 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
             }
         )
         let hostingView = NSHostingView(rootView: root)
+        // Window frame is authoritative. SwiftUI intrinsic width must never
+        // resize or recenter the WKWebView while inspector state changes.
+        hostingView.sizingOptions = []
         hostingView.frame = CGRect(origin: .zero, size: PipoMenuPanelGeometry.compactSize)
         hostingView.autoresizingMask = [.width, .height]
         hostingView.wantsLayer = true
@@ -89,6 +95,14 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         }
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self, self.panel.isVisible else { return event }
+            if event.window === self.panel,
+               self.wideHostForSession,
+               !self.inspectorVisible,
+               event.locationInWindow.x < 368
+            {
+                self.hidePanel()
+                return nil
+            }
             if event.window !== self.panel,
                event.window !== self.statusItem.button?.window
             {
@@ -124,8 +138,11 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
     private func showPanel() {
         inspectorVisible = false
         guard let anchor = statusItemScreenFrame, let visibleFrame = currentVisibleFrame else { return }
-        let target = PipoMenuPanelGeometry.frame(anchoredTo: anchor, in: visibleFrame, inspectorVisible: false)
+        wideHostForSession = PipoMenuPanelGeometry.usesExpandedInspector(anchoredTo: anchor, in: visibleFrame)
+        menuHostLayout.usesWideHost = wideHostForSession
+        let target = PipoMenuPanelGeometry.frame(anchoredTo: anchor, in: visibleFrame, inspectorVisible: wideHostForSession)
         if !panel.isVisible {
+            panel.contentView?.layoutSubtreeIfNeeded()
             panel.setFrame(PipoMenuPanelGeometry.offscreenRightFrame(from: target, in: visibleFrame), display: true)
             panel.alphaValue = 0
             panel.orderFrontRegardless()
@@ -165,7 +182,17 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
             visibility = .hidden
             return
         }
-        applyFrame(inspectorVisible: inspectorVisible, animated: false)
+        if wideHostForSession,
+           let anchor = statusItemScreenFrame,
+           let visibleFrame = currentVisibleFrame,
+           !PipoMenuPanelGeometry.usesExpandedInspector(anchoredTo: anchor, in: visibleFrame)
+        {
+            // Never squeeze a live 760pt WKWebView. Close; next open selects
+            // the 420pt overlay host for this display.
+            hidePanel()
+            return
+        }
+        applyFrame(useWideHost: wideHostForSession, animated: false)
         panel.alphaValue = 1
         visibility = .shown
     }
@@ -173,17 +200,9 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
     @discardableResult
     private func setInspectorVisible(_ visible: Bool) -> Bool {
         inspectorVisible = visible
-        let expanded: Bool
-        if visible, let anchor = statusItemScreenFrame, let visibleFrame = currentVisibleFrame {
-            expanded = PipoMenuPanelGeometry.usesExpandedInspector(anchoredTo: anchor, in: visibleFrame)
-        } else {
-            expanded = false
-        }
-        // The web inspector owns its entrance and exit motion. Resize the
-        // transparent host immediately so the already-visible main pane never
-        // interpolates away from its right-edge anchor.
-        applyFrame(inspectorVisible: expanded, animated: false)
-        return expanded
+        // Host width is selected before orderFront and remains immutable for
+        // this open session. Inspector visibility changes DOM only.
+        return wideHostForSession
     }
 
     private func observeUrgency() {
@@ -208,12 +227,12 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         repositionVisiblePanel()
     }
 
-    private func applyFrame(inspectorVisible: Bool, animated: Bool) {
+    private func applyFrame(useWideHost: Bool, animated: Bool) {
         guard let anchor = statusItemScreenFrame, let visibleFrame = currentVisibleFrame else { return }
         let target = PipoMenuPanelGeometry.frame(
             anchoredTo: anchor,
             in: visibleFrame,
-            inspectorVisible: inspectorVisible
+            inspectorVisible: useWideHost
         )
         guard animated else {
             motionTask?.cancel()
@@ -223,8 +242,8 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         animatePanel(
             to: target,
             alpha: panel.alphaValue,
-            duration: inspectorVisible ? PipoMenuPanelGeometry.showDuration : PipoMenuPanelGeometry.hideDuration,
-            curve: inspectorVisible ? .show : .hide
+            duration: useWideHost ? PipoMenuPanelGeometry.showDuration : PipoMenuPanelGeometry.hideDuration,
+            curve: useWideHost ? .show : .hide
         )
     }
 

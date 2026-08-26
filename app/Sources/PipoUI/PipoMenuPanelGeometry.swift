@@ -1,5 +1,14 @@
 import CoreGraphics
 import Foundation
+import Observation
+
+@MainActor
+@Observable
+package final class PipoMenuHostLayout {
+    package var usesWideHost = false
+    package init() {}
+    package var width: CGFloat { usesWideHost ? PipoMenuPanelGeometry.expandedSize.width : PipoMenuPanelGeometry.compactSize.width }
+}
 
 package enum PipoMenuPanelGeometry {
     package static let compactSize = CGSize(width: 420, height: 660)

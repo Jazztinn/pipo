@@ -30,6 +30,16 @@ import Testing
     #expect(snapshot.sections.messages.first?.entityKey == "lms:/message/index.php?id=9")
 }
 
+@Test func instructorFieldsDecodeAndSurvivePrivacyProjection() throws {
+    let data = Data("""
+    {"version":3,"generated_at":"2026-08-26T01:00:00Z","site_name":"LPU","student_name":"Alex","sections":{"due_soon":[{"id":9,"entity_key":"assignment:12:9","kind":"assignment","title":"Essay","course_id":12,"course_name":"History","instructor":"Professor McGonagall","destination":""}],"notifications":[],"new_assignments":[],"messages":[],"grade_feedback":[]},"courses":[{"id":12,"name":"History","instructor":"Professor McGonagall"}]}
+    """.utf8)
+    let snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: data)
+    #expect(snapshot.courses.first?.instructor == "Professor McGonagall")
+    #expect(snapshot.sections.dueSoon.first?.instructor == "Professor McGonagall")
+    #expect(snapshot.privacyProjected().sections.dueSoon.first?.instructor == "Professor McGonagall")
+}
+
 @Test func stableEntityKeysDeduplicateEquivalentDestinations() {
     let first = DashboardItem(id: "one", kind: "assignment", title: "Work", courseID: 7, courseName: "Course", destination: "/mod/assign/view.php?b=2&a=1#top")
     let second = DashboardItem(id: "two", kind: "assignment", title: "Work", courseID: 7, courseName: "Course", destination: "/mod/assign/view.php?a=1&b=2")

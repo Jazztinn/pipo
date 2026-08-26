@@ -736,6 +736,7 @@ public struct PipoRootView: View {
     private let model: PipoModel
     private let configuration: PipoUIConfiguration
     private let hostMode: PipoWebMenuHostMode
+    private let menuHostLayout: PipoMenuHostLayout
     private let onMenuInspectorVisibilityChanged: (Bool) -> Bool
     private let onMenuDismiss: () -> Void
     @State private var phase: PipoUIPhase
@@ -743,7 +744,6 @@ public struct PipoRootView: View {
     @State private var selectedTab: PipoTab = .today
     @State private var selectedCourseID: String?
     @State private var isSignOutConfirmationPresented = false
-    @State private var isInspectorExpanded = false
 
     public init(
         model: PipoModel,
@@ -754,6 +754,7 @@ public struct PipoRootView: View {
             model: model,
             configuration: configuration,
             hostMode: hostMode,
+            menuHostLayout: PipoMenuHostLayout(),
             onMenuInspectorVisibilityChanged: { $0 },
             onMenuDismiss: {}
         )
@@ -763,11 +764,13 @@ public struct PipoRootView: View {
         model: PipoModel,
         configuration: PipoUIConfiguration = PipoUIConfiguration(),
         hostMode: PipoWebMenuHostMode = .menuBar,
+        menuHostLayout: PipoMenuHostLayout,
         onMenuInspectorVisibilityChanged: @escaping (Bool) -> Bool,
         onMenuDismiss: @escaping () -> Void
     ) {
         self.model = model
         self.hostMode = hostMode
+        self.menuHostLayout = menuHostLayout
         self.onMenuInspectorVisibilityChanged = onMenuInspectorVisibilityChanged
         self.onMenuDismiss = onMenuDismiss
         let resolvedConfiguration = configuration.modelBacked ? configuration : PipoUIConfiguration(model: model)
@@ -817,7 +820,7 @@ public struct PipoRootView: View {
                         onSignOut: { isSignOutConfirmationPresented = true },
                         onDismissMenu: onMenuDismiss,
                         onInspectorVisibilityChanged: { visible in
-                            isInspectorExpanded = onMenuInspectorVisibilityChanged(visible)
+                            _ = onMenuInspectorVisibilityChanged(visible)
                         }
                     )
                 }
@@ -921,7 +924,7 @@ public struct PipoRootView: View {
     }
 
     private var menuBarWidth: CGFloat {
-        isInspectorExpanded ? 760 : 420
+        menuHostLayout.width
     }
 }
 

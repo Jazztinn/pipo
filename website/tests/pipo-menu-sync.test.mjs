@@ -7,14 +7,15 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 test("website includes canonical Pipo MenuWeb bundle", async () => {
   const appRoot = resolve(root, "..");
-  for (const file of ["index.html", "menu.css", "menu.js", "demo-fixture.json", "pipoclick.mp3", "css/fontawesome.min.css"]) {
+  for (const file of ["index.html", "menu.css", "menu.js", "menu-helpers.js", "demo-fixture.json", "pipoclick.mp3", "css/fontawesome.min.css"]) {
     await assert.doesNotReject(access(resolve(root, "public/pipo-menu", file)));
   }
   const html = await readFile(resolve(root, "public/pipo-menu/index.html"), "utf8");
   assert.match(html, /menu\.js/);
+  assert.match(html, /menu-helpers\.js/);
   assert.doesNotMatch(html, /https:\/\//);
   const hash = createHash("sha256");
-  for (const file of ["index.html", "menu.css", "menu.js", "demo-fixture.json", "pipoclick.mp3", "css/fontawesome.min.css", "webfonts/fa-regular-400.woff2", "webfonts/fa-solid-900.woff2"]) hash.update(await readFile(resolve(root, "public/pipo-menu", file)));
+  for (const file of ["index.html", "menu.css", "menu.js", "menu-helpers.js", "demo-fixture.json", "pipoclick.mp3", "css/fontawesome.min.css", "webfonts/fa-regular-400.woff2", "webfonts/fa-solid-900.woff2"]) hash.update(await readFile(resolve(root, "public/pipo-menu", file)));
   assert.equal((await readFile(resolve(root, "public/pipo-menu/.canonical-sha256"), "utf8")).trim(), hash.digest("hex"));
   const runtime = await readFile(resolve(root, "public/pipo-menu/menu.js"), "utf8");
   const rootView = await readFile(resolve(appRoot, "app/Sources/PipoUI/FoundationView.swift"), "utf8");
@@ -63,6 +64,8 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(html, /aria-controls="inspector-grades-content"/);
   assert.match(html, /html\.embedded body > \.relative[^}]*transform: scale\(1\.27\)/);
   assert.match(html, /@media \(min-width: 736px\)/);
+  assert.match(html, /body > \.relative > \.mac-window\.w-\\\[380px\\\] \{[^}]*width: 380px;[^}]*flex: 0 0 380px/);
+  assert.match(html, /body > \.relative \{[^}]*gap: 16px/);
   assert.match(html, /width: 340px; height: 580px; max-width: 340px/);
   assert.match(html, /html\[data-host-mode="menuBar"\] \.mac-window\s*\{\s*box-shadow: none/);
   assert.match(html, /--inspector-enter-offset: 380px/);
@@ -78,7 +81,9 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(html, /@keyframes inspector-panel-in \{\s*from \{ transform:[^}]+\}\s*to \{ transform:[^}]+\}/);
   assert.match(html, /@keyframes inspector-panel-out \{\s*from \{ transform:[^}]+\}\s*to \{ transform:[^}]+\}/);
   assert.match(rootView, /\.frame\(maxWidth: hostMode == \.menuBar \? \.infinity : nil, alignment: \.trailing\)/);
-  assert.match(menuController, /applyFrame\(inspectorVisible: expanded, animated: false\)/);
+  assert.doesNotMatch(rootView, /@State private var isInspectorExpanded/);
+  assert.match(menuController, /applyFrame\(useWideHost: wideHostForSession, animated: false\)/);
+  assert.match(menuController, /return wideHostForSession/);
   assert.match(runtime, /prefers-reduced-motion: reduce/);
   assert.match(html, /role="tablist"/);
   for (const tab of ["today", "courses", "settings"]) assert.match(html, new RegExp(`id="tab-${tab}"[\\s\\S]{0,100}role="tab"[\\s\\S]{0,100}aria-controls="view-${tab}"`));

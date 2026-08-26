@@ -676,6 +676,7 @@ impl MoodleClient {
         } else {
             Vec::new()
         };
+        backfill_course_names(&mut assignments, std::slice::from_ref(&course));
 
         let supports_submission_status =
             supports_assignments && capabilities.contains("mod_assign_get_submission_status");
@@ -1230,7 +1231,66 @@ fn course_summary(course: Value) -> Value {
                 .filter(|value| !value.trim().is_empty())
         })
         .unwrap_or("Course");
-    json!({ "id": id, "entity_key": format!("course:{}", value_identifier(&id)), "name": name, "short_name": course.get("shortname"), })
+    let instructor = course_instructor(&course, name);
+    json!({ "id": id, "entity_key": format!("course:{}", value_identifier(&id)), "name": name, "short_name": course.get("shortname"), "instructor": instructor })
+}
+fn course_instructor(course: &Value, course_name: &str) -> Option<String> {
+    for key in ["instructor", "teacher"] {
+        if let Some(value) = course
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value.to_owned());
+        }
+    }
+    for key in ["contacts", "teachers", "instructors"] {
+        let names = course
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|person| {
+                person
+                    .get("fullname")
+                    .or_else(|| person.get("name"))
+                    .and_then(Value::as_str)
+            })
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if !names.is_empty() {
+            return Some(names.join(", "));
+        }
+    }
+    instructor_from_course_title(course_name)
+}
+fn instructor_from_course_title(course_name: &str) -> Option<String> {
+    let start = course_name.rfind('(')?;
+    let candidate = course_name.get(start + 1..)?.strip_suffix(')')?.trim();
+    let normalized = candidate.to_ascii_lowercase();
+    let honorifics = [
+        "mr.",
+        "mr ",
+        "ms.",
+        "ms ",
+        "mrs.",
+        "mrs ",
+        "dr.",
+        "dr ",
+        "prof.",
+        "prof ",
+        "professor ",
+        "sir ",
+        "ma'am ",
+        "maam ",
+    ];
+    honorifics
+        .iter()
+        .any(|prefix| normalized.starts_with(prefix))
+        .then(|| candidate.to_owned())
 }
 fn timestamp_is_today(value: Option<&str>) -> bool {
     let Some(value) = value else { return false };
@@ -1267,19 +1327,30 @@ fn backfill_course_names(items: &mut [Value], courses: &[Value]) {
             .get("course_name")
             .and_then(Value::as_str)
             .is_none_or(|name| name.trim().is_empty() || name == "Course");
-        if !needs_name {
-            continue;
-        }
-        let Some(name) = courses.iter().find_map(|course| {
-            (course.get("id").and_then(Value::as_i64) == Some(course_id))
-                .then(|| course.get("name").and_then(Value::as_str))
-                .flatten()
-        }) else {
+        let Some(course) = courses
+            .iter()
+            .find(|course| course.get("id").and_then(Value::as_i64) == Some(course_id))
+        else {
             continue;
         };
-        item.as_object_mut()
-            .expect("dashboard item object")
-            .insert("course_name".to_owned(), Value::String(name.to_owned()));
+        let object = item.as_object_mut().expect("dashboard item object");
+        if needs_name {
+            if let Some(name) = course.get("name").and_then(Value::as_str) {
+                object.insert("course_name".to_owned(), Value::String(name.to_owned()));
+            }
+        }
+        if object
+            .get("instructor")
+            .and_then(Value::as_str)
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            if let Some(instructor) = course.get("instructor").and_then(Value::as_str) {
+                object.insert(
+                    "instructor".to_owned(),
+                    Value::String(instructor.to_owned()),
+                );
+            }
+        }
     }
 }
 fn destination(value: &Value) -> String {
@@ -1576,7 +1647,14 @@ fn announcement_item(discussion: &Value, course: &Value, forum: &Value) -> Value
             .expect("announcement object")
             .insert("excerpt".to_owned(), Value::String(excerpt));
     }
-    result.as_object_mut().expect("announcement object").insert(
+    let object = result.as_object_mut().expect("announcement object");
+    if let Some(instructor) = course.get("instructor").and_then(Value::as_str) {
+        object.insert(
+            "instructor".to_owned(),
+            Value::String(instructor.to_owned()),
+        );
+    }
+    object.insert(
         "section".to_owned(),
         Value::String("announcements".to_owned()),
     );
@@ -1627,6 +1705,12 @@ fn resource_items(value: &Value, course: &Value) -> Vec<Value> {
                 destination_value,
             );
             let object = result.as_object_mut().expect("resource object");
+            if let Some(instructor) = course.get("instructor").and_then(Value::as_str) {
+                object.insert(
+                    "instructor".to_owned(),
+                    Value::String(instructor.to_owned()),
+                );
+            }
             object.insert(
                 "resource_kind".to_owned(),
                 module
@@ -1653,6 +1737,7 @@ fn published_grade_items(value: &Value, course: &Value) -> Vec<Value> {
             "title": grade.get("itemname").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).unwrap_or("Published grade"),
             "course_id": course_id,
             "course_name": course.get("name"),
+            "instructor": course.get("instructor"),
             "timestamp": grade.get("gradedategraded").map(timestamp_value).unwrap_or(Value::Null),
             "destination": "",
             "detail": published_grade,
@@ -1681,6 +1766,7 @@ fn course_grade_items(value: &Value, course: &Value) -> Vec<Value> {
                 "id": id,
                 "entity_key": entity_key,
                 "title": grade.get("itemname").cloned().unwrap_or(Value::String("Published grade".to_owned())),
+                "instructor": course.get("instructor"),
                 "published_grade": grade.get("gradeformatted"),
                 "feedback": grade.get("feedback").and_then(Value::as_str).and_then(plain_feedback),
                 "timestamp": grade.get("gradedategraded").map(timestamp_value).unwrap_or(Value::Null),
@@ -2007,9 +2093,33 @@ mod tests {
         )];
         backfill_course_names(
             &mut items,
-            &[json!({ "id": 12, "name": "History of Magic" })],
+            &[
+                json!({ "id": 12, "name": "History of Magic", "instructor": "Professor McGonagall" }),
+            ],
         );
         assert_eq!(items[0]["course_name"], "History of Magic");
+        assert_eq!(items[0]["instructor"], "Professor McGonagall");
+    }
+    #[test]
+    fn instructor_prefers_dedicated_course_contacts_then_title() {
+        let dedicated = json!({
+            "id": 12,
+            "fullname": "Operating Systems (Dr. Wrong Fallback)",
+            "contacts": [{ "fullname": "Prof. Edison Feranil" }]
+        });
+        assert_eq!(
+            course_summary(dedicated)["instructor"],
+            "Prof. Edison Feranil"
+        );
+
+        let title_only = json!({ "id": 13, "fullname": "Algorithms (Dr. Minerva McGonagall)" });
+        assert_eq!(
+            course_summary(title_only)["instructor"],
+            "Dr. Minerva McGonagall"
+        );
+
+        let unrelated = json!({ "id": 14, "fullname": "Ethics (Honors Section)" });
+        assert!(course_summary(unrelated)["instructor"].is_null());
     }
     #[test]
     fn failures_are_aggregated_by_section() {

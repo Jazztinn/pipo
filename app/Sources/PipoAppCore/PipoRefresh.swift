@@ -177,6 +177,7 @@ public actor DashboardRefreshCoordinator {
                 id: course.id,
                 name: course.name,
                 shortName: course.shortName ?? cachedCourse.shortName,
+                instructor: course.instructor ?? cachedCourse.instructor,
                 publishedTotal: has("grades") ? course.publishedTotal : cachedCourse.publishedTotal,
                 upcomingCount: has("due_soon") ? course.upcomingCount : cachedCourse.upcomingCount
             )

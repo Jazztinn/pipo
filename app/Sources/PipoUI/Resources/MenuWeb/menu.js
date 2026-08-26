@@ -5,6 +5,9 @@
   const mode = params.get('mode') === 'demo' ? 'demo' : 'native';
   if (params.get('embedded') === '1') document.documentElement.classList.add('embedded');
   const nativeBridge = window.pipo;
+  const documentGreeting = window.pipoMenuHelpers?.chooseGreeting(new Date(), Math.random()) || 'Hello';
+  const initialGreeting = document.getElementById('today-greeting');
+  if (initialGreeting) initialGreeting.textContent = documentGreeting;
   const requests = new Map();
   const allowed = new Set(['ui.ready', 'refresh', 'refreshSection', 'selectTab', 'loadCourse', 'updateSettings', 'updateChannel', 'markSeen', 'undoSeen', 'snooze', 'openDestination', 'copyDetails', 'addToCalendar', 'requestCalendarAccess', 'pinCourse', 'unpinCourse', 'hideCourse', 'restoreCourse', 'clearCache', 'checkForUpdates', 'exportDiagnostics', 'retrySecureStorage', 'setInspectorVisible', 'dismissMenu', 'signOut']);
   let currentState = null;
@@ -155,7 +158,7 @@
     if (!isActivity) return;
     const values = {
       'activity-course': courseNameFor(item) || 'Course not supplied',
-      'activity-instructor': valueFor(item, 'instructor') || 'Not supplied',
+      'activity-instructor': window.pipoMenuHelpers?.instructorFor(item) || 'Instructor unavailable',
       'activity-kind': valueFor(item, 'kind') || type,
       'activity-due': dateText(item) || 'No date supplied'
     };
@@ -295,7 +298,7 @@
   function renderState(state) {
     const today = document.getElementById('view-today'); const courses = document.getElementById('view-courses');
     if (today && !todayShellReady) { const greeting = el('h2', 'text-sm font-bold text-white tracking-tight'); greeting.id = 'today-greeting'; const notices = el('div', 'space-y-2'); notices.id = 'today-notices'; const sections = el('div', 'space-y-3'); sections.id = 'today-sections'; today.replaceChildren(greeting, notices, sections); todayShellReady = true; }
-    const greeting = document.getElementById('today-greeting'); if (greeting) greeting.textContent = `Hello${state.studentName ? `, ${state.studentName}` : ''}`;
+    const greeting = document.getElementById('today-greeting'); if (greeting) greeting.textContent = `${documentGreeting}${state.studentName ? `, ${state.studentName}` : ''}`;
     const notices = document.getElementById('today-notices'); if (notices) { const nodes = []; if (state.phase === 'failed') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-rose-400', state.errorMessage || 'Pipo could not load your LMS.')); else if (state.phase === 'offline') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Showing saved LMS data. Some private details require a live connection.')); else if (state.phase === 'loading' || state.phase === 'authenticating') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 animate-pulse', 'Connecting to your LMS…')); if (state.failures?.length) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections could not refresh.')); notices.replaceChildren(...nodes); }
     const consumed = new Set(); const consume = items => uniqueItems(items).filter(item => { const key = String(item?.entityKey || item?.id || ''); if (key && consumed.has(key)) return false; if (key) consumed.add(key); return true; });
     const definitions = [
