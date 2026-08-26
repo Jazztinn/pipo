@@ -35,7 +35,7 @@ public enum PipoLegal {
     }
 
     public static func bundledDocument(named name: String, extension fileExtension: String) -> String? {
-        guard let url = Bundle.module.url(forResource: name, withExtension: fileExtension, subdirectory: "Legal") else { return nil }
+        guard let url = PipoResources.url(forResource: name, withExtension: fileExtension, subdirectory: "Legal") else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
     }
 

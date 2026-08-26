@@ -2,7 +2,7 @@ import AppKit
 
 public enum PipoBrandAssets {
     public static let hollowLogo: NSImage = {
-        guard let url = Bundle.module.url(forResource: "PipoLogoHollow", withExtension: "png"),
+        guard let url = PipoResources.url(forResource: "PipoLogoHollow", withExtension: "png"),
               let image = NSImage(contentsOf: url)
         else {
             return NSImage(systemSymbolName: "flag", accessibilityDescription: "Pipo") ?? NSImage()

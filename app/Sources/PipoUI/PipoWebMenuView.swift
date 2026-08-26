@@ -231,15 +231,11 @@ struct PipoWebMenuView: NSViewRepresentable {
         }
 
         static var menuResourceRoot: URL? {
-            if let packaged = Bundle.main.resourceURL?
-                .appendingPathComponent("Pipo_PipoUI.bundle", isDirectory: true)
-                .appendingPathComponent("MenuWeb", isDirectory: true),
-               FileManager.default.fileExists(atPath: packaged.appendingPathComponent("index.html").path)
-            {
-                return packaged
+            PipoResources.bundleURL.map {
+                $0.appendingPathComponent("MenuWeb", isDirectory: true)
+            }.flatMap {
+                FileManager.default.fileExists(atPath: $0.appendingPathComponent("index.html").path) ? $0 : nil
             }
-            let module = Bundle.module.resourceURL?.appendingPathComponent("MenuWeb", isDirectory: true)
-            return module.flatMap { FileManager.default.fileExists(atPath: $0.appendingPathComponent("index.html").path) ? $0 : nil }
         }
 
         func loadMenu(in view: WKWebView) {

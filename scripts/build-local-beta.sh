@@ -35,6 +35,7 @@ cp -R "$PIPO_UI_BUNDLE" "$APP/Contents/Resources/Pipo_PipoUI.bundle"
 test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/MenuWeb/index.html"
 test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/MenuWeb/css/fontawesome.min.css"
 test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/MenuWeb/webfonts/fa-solid-900.woff2"
+test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/PipoLogoHollow.png"
 
 SPARKLE_FRAMEWORK=$(find "$ROOT/.build" -type d -name Sparkle.framework -print -quit)
 if [ -z "$SPARKLE_FRAMEWORK" ]; then
