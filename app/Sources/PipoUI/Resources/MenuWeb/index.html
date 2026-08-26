@@ -38,7 +38,7 @@
     }
 
     html[data-host-mode="menuBar"] {
-      --inspector-enter-offset: 356px;
+      --inspector-enter-offset: 380px;
     }
 
     .mac-card {
@@ -67,7 +67,7 @@
     }
 
     .mac-segmented-btn {
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .mac-segmented-btn.active {
@@ -157,10 +157,11 @@
     #main-panel { min-height: 0; }
     #main-panel > .view-panel { flex: 1 1 auto; min-height: 0; height: auto !important; overscroll-behavior: contain; scrollbar-gutter: stable; }
     #main-panel > .view-panel.hidden { display: none; }
-    #main-navigation { flex: 0 0 auto; position: relative; z-index: 30; padding: 8px 14px 12px; min-height: 58px; box-shadow: 0 -12px 28px rgba(12, 11, 15, .18); }
-    #main-navigation .mac-segmented { width: 100%; max-width: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .mac-segmented-btn { flex: 1 1 0; min-width: 0; height: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; font-weight: 600; }
-    .mac-segmented-btn i { width: 12px; font-size: 10px; }
+    #main-navigation { flex: 0 0 58px; position: relative; z-index: 30; height: 58px; min-height: 58px; max-height: 58px; padding: 7px 14px 12px; box-shadow: 0 -12px 28px rgba(12, 11, 15, .18); box-sizing: border-box; }
+    #main-navigation .mac-segmented { width: 100%; max-width: none; height: 38px; min-height: 38px; max-height: 38px; padding: 1px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: center; box-sizing: border-box; }
+    #main-navigation .mac-segmented-btn { width: 100%; min-width: 0; height: 34px; min-height: 34px; max-height: 34px; padding: 0 8px; border-radius: 8px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; font-weight: 600; line-height: 1; transform: none; }
+    #main-navigation .mac-segmented-btn i { width: 12px; font-size: 10px; line-height: 1; }
+    #main-navigation .mac-segmented-btn span { line-height: 1; }
     #sync-button { min-height: 24px; }
     #sync-dot[data-phase="ready"] { background: #34d399; }
     #sync-dot[data-phase="offline"] { background: #fbbf24; }
@@ -311,7 +312,7 @@
   <div id="pipo-shell" class="relative flex gap-4 items-start max-w-5xl w-full justify-center">
 
     <!-- LEFT SIDE INSPECTOR PANEL (Opens always to the LEFT) -->
-    <div id="inspector-panel" role="region" aria-labelledby="inspector-title" aria-hidden="true" class="mac-window w-[340px] rounded-2xl p-4 hidden flex-col text-xs transition-all duration-300 animate-fade-in relative z-10 max-h-[580px]">
+    <div id="inspector-panel" role="region" aria-labelledby="inspector-title" aria-hidden="true" class="mac-window w-[340px] rounded-2xl p-4 hidden flex-col text-xs relative z-10 max-h-[580px]">
         <!-- Inspector Navigation Header -->
         <div id="inspector-nav" class="flex items-center justify-between border-b border-white/10 pb-2.5">
           <button id="inspector-back" type="button" aria-label="Back to dashboard" class="text-neutral-400 hover:text-white flex items-center gap-1 text-[11px] font-medium transition">
@@ -777,19 +778,19 @@
           <button
             id="tab-today"
             type="button" role="tab" aria-controls="view-today" aria-selected="true" tabindex="0"
-            class="mac-segmented-btn active flex-1 py-1.5 rounded-lg text-center transition">
+            class="mac-segmented-btn active text-center">
             <i class="fa-regular fa-calendar-check" aria-hidden="true"></i><span>Today</span>
           </button>
           <button
             id="tab-courses"
             type="button" role="tab" aria-controls="view-courses" aria-selected="false" tabindex="-1"
-            class="mac-segmented-btn flex-1 py-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 font-medium text-center transition">
+            class="mac-segmented-btn text-neutral-400 hover:text-neutral-200 text-center">
             <i class="fa-solid fa-book-open" aria-hidden="true"></i><span>Courses</span>
           </button>
           <button
             id="tab-settings"
             type="button" role="tab" aria-controls="view-settings" aria-selected="false" tabindex="-1"
-            class="mac-segmented-btn flex-1 py-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 font-medium text-center transition">
+            class="mac-segmented-btn text-neutral-400 hover:text-neutral-200 text-center">
             <i class="fa-solid fa-gear" aria-hidden="true"></i><span>Settings</span>
           </button>
         </div>

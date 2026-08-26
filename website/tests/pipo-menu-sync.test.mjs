@@ -62,7 +62,11 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(html, /@media \(min-width: 736px\)/);
   assert.match(html, /width: 340px; height: 580px; max-width: 340px/);
   assert.match(html, /html\[data-host-mode="menuBar"\] \.mac-window\s*\{\s*box-shadow: none/);
-  assert.match(html, /--inspector-enter-offset: 356px/);
+  assert.match(html, /--inspector-enter-offset: 380px/);
+  assert.match(html, /#main-navigation \{[^}]*height: 58px;[^}]*min-height: 58px;[^}]*max-height: 58px/);
+  assert.match(html, /#main-navigation \.mac-segmented-btn \{[^}]*height: 34px;[^}]*min-height: 34px;[^}]*max-height: 34px/);
+  assert.doesNotMatch(html, /\.mac-segmented-btn \{\s*transition: all/);
+  assert.doesNotMatch(html, /id="inspector-panel"[^>]*transition-all/);
   assert.match(runtime, /inspector\.classList\.add\('inspector-exit'\)/);
   assert.match(runtime, /prefers-reduced-motion: reduce/);
   assert.match(html, /role="tablist"/);

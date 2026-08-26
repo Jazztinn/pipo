@@ -179,7 +179,10 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         } else {
             expanded = false
         }
-        applyFrame(inspectorVisible: expanded, animated: panel.isVisible)
+        // The web inspector owns its entrance and exit motion. Resize the
+        // transparent host immediately so the already-visible main pane never
+        // interpolates away from its right-edge anchor.
+        applyFrame(inspectorVisible: expanded, animated: false)
         return expanded
     }
 

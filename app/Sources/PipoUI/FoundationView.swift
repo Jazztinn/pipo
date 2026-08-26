@@ -743,7 +743,6 @@ public struct PipoRootView: View {
     @State private var selectedTab: PipoTab = .today
     @State private var selectedCourseID: String?
     @State private var isSignOutConfirmationPresented = false
-    @State private var isInspectorVisible = false
     @State private var isInspectorExpanded = false
 
     public init(
@@ -818,7 +817,6 @@ public struct PipoRootView: View {
                         onSignOut: { isSignOutConfirmationPresented = true },
                         onDismissMenu: onMenuDismiss,
                         onInspectorVisibilityChanged: { visible in
-                            isInspectorVisible = visible
                             isInspectorExpanded = onMenuInspectorVisibilityChanged(visible)
                         }
                     )
@@ -834,13 +832,13 @@ public struct PipoRootView: View {
             maxHeight: hostMode == .window ? .infinity : 660
         )
         .background {
-            switch visiblePhase {
-            case .onboarding, .loading, .failed:
-                PipoPalette.canvas
-            default:
-                if hostMode == .menuBar {
-                    PipoMenuBarMaterialBackdrop(isInspectorVisible: isInspectorVisible)
-                } else {
+            if hostMode == .menuBar {
+                Color.clear
+            } else {
+                switch visiblePhase {
+                case .onboarding, .loading, .failed:
+                    PipoPalette.canvas
+                default:
                     PipoHostMaterial()
                 }
             }
@@ -1952,40 +1950,6 @@ private struct PipoHostMaterial: View {
             Color.clear.glassEffect(.regular, in: Rectangle())
         } else {
             Rectangle().fill(.thinMaterial)
-        }
-    }
-}
-
-private struct PipoMenuBarMaterialBackdrop: View {
-    let isInspectorVisible: Bool
-
-    var body: some View {
-        GeometryReader { proxy in
-            let expanded = isInspectorVisible && proxy.size.width >= 736
-            HStack(spacing: 16) {
-                if expanded {
-                    PipoMenuBarPaneMaterial()
-                        .frame(width: 340)
-                }
-                PipoMenuBarPaneMaterial()
-                    .frame(width: isInspectorVisible && !expanded ? 340 : 380)
-            }
-            .frame(height: min(660, proxy.size.height))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-            .padding(.trailing, 12)
-        }
-    }
-}
-
-private struct PipoMenuBarPaneMaterial: View {
-    var body: some View {
-        if #available(macOS 26.0, *) {
-            Color.clear
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-        } else {
-            RoundedRectangle(cornerRadius: 16).fill(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
 }
