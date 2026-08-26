@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 test("website includes canonical Pipo MenuWeb bundle", async () => {
+  const appRoot = resolve(root, "..");
   for (const file of ["index.html", "menu.css", "menu.js", "demo-fixture.json", "pipoclick.mp3", "css/fontawesome.min.css"]) {
     await assert.doesNotReject(access(resolve(root, "public/pipo-menu", file)));
   }
@@ -16,6 +17,8 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   for (const file of ["index.html", "menu.css", "menu.js", "demo-fixture.json", "pipoclick.mp3", "css/fontawesome.min.css", "webfonts/fa-regular-400.woff2", "webfonts/fa-solid-900.woff2"]) hash.update(await readFile(resolve(root, "public/pipo-menu", file)));
   assert.equal((await readFile(resolve(root, "public/pipo-menu/.canonical-sha256"), "utf8")).trim(), hash.digest("hex"));
   const runtime = await readFile(resolve(root, "public/pipo-menu/menu.js"), "utf8");
+  const rootView = await readFile(resolve(appRoot, "app/Sources/PipoUI/FoundationView.swift"), "utf8");
+  const menuController = await readFile(resolve(appRoot, "app/Sources/PipoApp/PipoMenuBarController.swift"), "utf8");
   for (const action of ["ui.ready", "refresh", "selectTab", "markSeen", "snooze", "openDestination", "copyDetails", "addToCalendar", "setInspectorVisible", "signOut"]) assert.match(runtime, new RegExp(action.replace(".", "\\.")));
   assert.match(runtime, /textContent/);
   assert.match(runtime, /mode === 'demo'/);
@@ -68,6 +71,14 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.doesNotMatch(html, /\.mac-segmented-btn \{\s*transition: all/);
   assert.doesNotMatch(html, /id="inspector-panel"[^>]*transition-all/);
   assert.match(runtime, /inspector\.classList\.add\('inspector-exit'\)/);
+  assert.match(runtime, /pending\?\.action === 'setInspectorVisible'[\s\S]{0,500}revealInspector/);
+  assert.match(runtime, /requestAnimationFrame\(\(\) => window\.requestAnimationFrame/);
+  assert.match(runtime, /event\.target === inspector && event\.animationName === 'inspector-panel-out'/);
+  assert.match(runtime, /inspector\.dataset\.closing !== 'true'/);
+  assert.match(html, /@keyframes inspector-panel-in \{\s*from \{ transform:[^}]+\}\s*to \{ transform:[^}]+\}/);
+  assert.match(html, /@keyframes inspector-panel-out \{\s*from \{ transform:[^}]+\}\s*to \{ transform:[^}]+\}/);
+  assert.match(rootView, /\.frame\(maxWidth: hostMode == \.menuBar \? \.infinity : nil, alignment: \.trailing\)/);
+  assert.match(menuController, /applyFrame\(inspectorVisible: expanded, animated: false\)/);
   assert.match(runtime, /prefers-reduced-motion: reduce/);
   assert.match(html, /role="tablist"/);
   for (const tab of ["today", "courses", "settings"]) assert.match(html, new RegExp(`id="tab-${tab}"[\\s\\S]{0,100}role="tab"[\\s\\S]{0,100}aria-controls="view-${tab}"`));

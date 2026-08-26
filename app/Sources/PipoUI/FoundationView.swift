@@ -831,6 +831,7 @@ public struct PipoRootView: View {
             idealHeight: hostMode == .window ? 600 : 660,
             maxHeight: hostMode == .window ? .infinity : 660
         )
+        .frame(maxWidth: hostMode == .menuBar ? .infinity : nil, alignment: .trailing)
         .background {
             if hostMode == .menuBar {
                 Color.clear

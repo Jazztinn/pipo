@@ -14,6 +14,7 @@
   let activeTab = 'today';
   let inspectorTrigger = null;
   let inspectorCloseTimer = null;
+  let inspectorOpenToken = 0;
   const tabState = {
     today: { query: '', courseFilter: 'all', categoryFilter: 'all' },
     courses: { query: '', courseFilter: 'all', categoryFilter: 'all' },
@@ -72,7 +73,16 @@
     if (pending?.action === 'loadCourse' && response.data) {
       const target = String(response.targetID || pending.payload?.courseID || ''); const selected = String(selectedItem?.id || selectedItem?.courseID || ''); const inspector = document.getElementById('inspector-panel');
       const responseRevision = Number(response.revision ?? pending.payload?.revision ?? 0);
-      if (!inspector?.classList.contains('hidden') && target && target === selected && responseRevision >= revision && responseRevision >= Number(pending.payload?.revision || 0)) renderCourseDetail(response.data);
+      const inspectorActive = inspector && (!inspector.classList.contains('hidden') || inspector.dataset.opening === 'true') && inspector.dataset.closing !== 'true';
+      if (inspectorActive && target && target === selected && responseRevision >= revision && responseRevision >= Number(pending.payload?.revision || 0)) renderCourseDetail(response.data);
+    }
+    if (pending?.action === 'setInspectorVisible' && pending.payload?.visible === true) {
+      const inspector = document.getElementById('inspector-panel');
+      if (response.success === false) {
+        if (inspector) { delete inspector.dataset.opening; delete inspector.dataset.openToken; }
+      } else {
+        revealInspector(Number(pending.payload?.openToken || 0));
+      }
     }
     const labels = { refresh: 'Pipo refreshed', refreshSection: 'Section refreshed', markSeen: 'Marked as seen', undoSeen: 'Restored as unseen', snooze: 'Snoozed for one hour', openDestination: 'Opened in LMS', copyDetails: 'Details copied', addToCalendar: 'Added to Calendar', requestCalendarAccess: 'Calendar access updated', pinCourse: 'Course pinned', unpinCourse: 'Course unpinned', hideCourse: 'Course hidden', restoreCourse: 'Course restored', updateSettings: 'Settings saved', updateChannel: 'Update channel saved', clearCache: 'Saved dashboard cleared', checkForUpdates: 'Update check started', exportDiagnostics: 'Diagnostics exported', retrySecureStorage: 'Secure storage checked' };
     if (response.success === false) showToast(response.error || 'Action failed', pending?.source);
@@ -93,12 +103,27 @@
     target.textContent = String(message); toast.classList.remove('opacity-0', 'translate-y-4'); toast.classList.add('opacity-100', 'translate-y-0');
     window.clearTimeout(showToast.timer); showToast.timer = window.setTimeout(() => { toast.classList.add('opacity-0', 'translate-y-4'); toast.classList.remove('opacity-100', 'translate-y-0'); }, 2200);
   }
+  function revealInspector(token) {
+    const inspector = document.getElementById('inspector-panel');
+    if (!inspector || token !== inspectorOpenToken || Number(inspector.dataset.openToken || 0) !== token || inspector.dataset.closing === 'true') return;
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      if (token !== inspectorOpenToken || Number(inspector.dataset.openToken || 0) !== token || inspector.dataset.closing === 'true') return;
+      inspector.classList.remove('hidden', 'inspector-enter', 'inspector-exit');
+      inspector.classList.add('flex');
+      void inspector.offsetWidth;
+      inspector.classList.add('inspector-enter');
+      inspector.setAttribute('aria-hidden', 'false');
+      delete inspector.dataset.opening;
+      syncInspectorModality();
+      document.getElementById('inspector-close')?.focus({ preventScroll: true });
+    }));
+  }
   function openItemInspector(type, item, skipLoad = false, trigger = null) {
     const inspector = document.getElementById('inspector-panel'); if (!inspector) return;
     window.clearTimeout(inspectorCloseTimer); inspectorCloseTimer = null; delete inspector.dataset.closing;
     if (trigger) inspectorTrigger = trigger;
     selectedItem = item; selectedType = type;
-    if (type === 'course' && mode === 'native' && !skipLoad) { request('loadCourse', { courseID: item?.id }); }
+    const shouldLoadCourse = type === 'course' && mode === 'native' && !skipLoad;
     document.getElementById('inspector-category').textContent = type === 'course' ? 'Course' : type[0].toUpperCase() + type.slice(1);
     document.getElementById('inspector-title').textContent = itemTitle(item);
     document.getElementById('inspector-subtitle').textContent = itemText(item) || (type === 'course' ? 'Course details' : 'LMS activity');
@@ -110,10 +135,18 @@
     syncInspectorCourseData(type === 'course' ? item : null);
     syncInspectorGrades(type === 'course' ? (item.grades || []) : null);
     const open = document.getElementById('inspector-open-label'); if (open) open.textContent = type === 'course' ? 'Open course in LMS' : 'Open item in LMS';
-    inspector.classList.remove('hidden', 'inspector-exit'); inspector.classList.add('flex', 'inspector-enter'); inspector.setAttribute('aria-hidden', 'false');
-    syncInspectorModality();
-    document.getElementById('inspector-close')?.focus({ preventScroll: true });
-    request('setInspectorVisible', { visible: true, itemID: item?.id || null });
+    const alreadyActive = !inspector.classList.contains('hidden') || inspector.dataset.opening === 'true';
+    if (alreadyActive) {
+      if (shouldLoadCourse) request('loadCourse', { courseID: item?.id });
+      return;
+    }
+    const openToken = ++inspectorOpenToken;
+    inspector.dataset.opening = 'true';
+    inspector.dataset.openToken = String(openToken);
+    inspector.setAttribute('aria-hidden', 'true');
+    request('setInspectorVisible', { visible: true, itemID: item?.id || null, openToken });
+    if (shouldLoadCourse) request('loadCourse', { courseID: item?.id });
+    if (!nativeBridge?.request && mode !== 'demo') revealInspector(openToken);
   }
   function syncActivityDetails(type, item) {
     const block = document.getElementById('inspector-activity-details');
@@ -181,12 +214,20 @@
     const inspector = document.getElementById('inspector-panel');
     if (!inspector || inspector.classList.contains('hidden')) return false;
     if (inspector.dataset.closing === 'true') return true;
+    inspectorOpenToken += 1;
+    delete inspector.dataset.opening;
+    delete inspector.dataset.openToken;
     inspector.dataset.closing = 'true';
     inspector.classList.remove('inspector-enter');
     inspector.classList.add('inspector-exit');
     inspector.setAttribute('aria-hidden', 'true');
-    const delay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 180;
-    inspectorCloseTimer = window.setTimeout(() => {
+    function onInspectorExitEnd(event) {
+      if (event.target === inspector && event.animationName === 'inspector-panel-out') finishClose();
+    }
+    const finishClose = () => {
+      if (inspector.dataset.closing !== 'true') return;
+      window.clearTimeout(inspectorCloseTimer); inspectorCloseTimer = null;
+      inspector.removeEventListener('animationend', onInspectorExitEnd);
       inspector.classList.add('hidden');
       inspector.classList.remove('flex', 'inspector-exit');
       delete inspector.dataset.closing;
@@ -194,8 +235,12 @@
       main?.removeAttribute('inert'); main?.removeAttribute('aria-hidden');
       inspectorTrigger?.focus?.({ preventScroll: true }); inspectorTrigger = null;
       request('setInspectorVisible', { visible: false });
-      inspectorCloseTimer = null;
-    }, delay);
+    };
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) finishClose();
+    else {
+      inspector.addEventListener('animationend', onInspectorExitEnd);
+      inspectorCloseTimer = window.setTimeout(finishClose, 240);
+    }
     return true;
   }
   function syncInspectorModality() { const inspector = document.getElementById('inspector-panel'); const main = document.getElementById('main-panel'); const compactOpen = window.matchMedia('(max-width: 735px)').matches && inspector && !inspector.classList.contains('hidden'); if (compactOpen) { main?.setAttribute('inert', ''); main?.setAttribute('aria-hidden', 'true'); } else { main?.removeAttribute('inert'); main?.removeAttribute('aria-hidden'); } }
