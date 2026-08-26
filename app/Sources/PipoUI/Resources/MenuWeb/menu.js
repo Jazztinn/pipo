@@ -26,34 +26,41 @@
   const sectionSignatures = new Map();
   let todayShellReady = false;
   const el = (tag, className, value) => { const node = document.createElement(tag); if (className) node.className = className; if (value != null) node.textContent = String(value); return node; };
-  const meaningful = value => value != null && !['', '-', '—', 'null', 'undefined'].includes(String(value).trim().toLowerCase());
+  const meaningful = value => value != null && value !== false && !['', '-', '—', 'null', 'undefined', 'not supplied'].includes(String(value).trim().toLowerCase());
   const field = (value, fallback = '—') => meaningful(value) ? value : fallback;
   const valueFor = (object, ...keys) => keys.map(key => object?.[key]).find(value => value != null && value !== '');
+  const safeArray = value => Array.isArray(value) ? value : [];
   const courseIDFor = item => valueFor(item, 'courseID', 'course_id');
   const courseNameFor = item => valueFor(item, 'courseName', 'course_name');
   const itemTitle = item => field(valueFor(item, 'title', 'name', 'shortName', 'short_name', 'label'), 'LMS item');
   const itemDetail = item => valueFor(item, 'body', 'detail', 'description', 'feedback', 'excerpt', 'message');
-  const formatTimestamp = value => { if (!meaningful(value)) return null; const raw = String(value); if (!/^\d{4}-\d{2}-\d{2}T/.test(raw)) return raw; const date = new Date(raw); if (Number.isNaN(date.valueOf())) return raw; const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()); const days = Math.round((target - start) / 86400000); const day = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : days > 1 && days < 7 ? new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(date) : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date); const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date); return `${day} · ${time}`; };
+  const formatTimestamp = value => { if (!meaningful(value)) return null; const raw = String(value); if (!/^\d{4}-\d{2}-\d{2}T/.test(raw)) return raw; const date = new Date(raw); if (Number.isNaN(date.valueOf())) return null; const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()); const days = Math.round((target - start) / 86400000); const day = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : days > 1 && days < 7 ? new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(date) : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date); const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date); return `${day} · ${time}`; };
   const dateText = item => valueFor(item, 'due', 'date') || formatTimestamp(valueFor(item, 'timestampISO', 'timestamp'));
-  const itemText = item => [courseNameFor(item), valueFor(item, 'subtitle', 'courseCode', 'course_code'), dateText(item)].filter(Boolean).join(' · ');
+  const itemText = item => [courseNameFor(item), valueFor(item, 'subtitle', 'courseCode', 'course_code'), dateText(item)].filter(meaningful).join(' · ');
   const courseActivities = course => {
     const courseID = String(course?.id || courseIDFor(course) || '');
     if (!courseID || !currentState) return [];
     const sections = ['nextUp', 'schedule', 'dueSoon', 'newAssignments', 'notifications', 'messages', 'gradeFeedback', 'announcements', 'resources'];
     const seen = new Set();
-    return sections.flatMap(section => currentState[section] || [])
+    return sections.flatMap(section => safeArray(currentState[section]))
       .filter(item => String(courseIDFor(item) || '') === courseID)
       .filter(item => { const key = String(item?.entityKey || item?.id || `${itemTitle(item)}:${dateText(item) || ''}`); if (seen.has(key)) return false; seen.add(key); return true; });
   };
   const cardSecondary = (item, type) => {
-    if (type !== 'course') return [type === 'activity' ? item?.sourceLabel : null, itemText(item) || itemDetail(item) || type[0].toUpperCase() + type.slice(1)].filter(Boolean).join(' · ');
+    if (type !== 'course') return [type === 'activity' ? item?.sourceLabel : null, itemText(item) || itemDetail(item) || type[0].toUpperCase() + type.slice(1)].filter(meaningful).join(' · ');
     const suppliedCount = valueFor(item, 'upcomingCount', 'upcoming_count');
-    const count = suppliedCount == null ? courseActivities(item).length : Number(suppliedCount);
+    const parsedCount = Number(suppliedCount); const count = suppliedCount == null || !Number.isFinite(parsedCount) ? courseActivities(item).length : parsedCount;
     const publishedTotal = valueFor(item, 'publishedTotal', 'published_total');
-    const metadata = [valueFor(item, 'shortName', 'short_name'), meaningful(publishedTotal) && `Grade ${publishedTotal}`, `${count} upcoming`].filter(Boolean);
+    const metadata = [valueFor(item, 'shortName', 'short_name'), meaningful(publishedTotal) && `Grade ${publishedTotal}`, `${count} upcoming`].filter(meaningful);
     return metadata.join(' · ');
   };
-  function request(action, payload = {}, source = 'main') {
+  function setActionPending(trigger, pending) {
+    if (!trigger?.setAttribute) return;
+    trigger.toggleAttribute('disabled', pending);
+    trigger.setAttribute('aria-busy', String(pending));
+    trigger.classList.toggle('opacity-60', pending);
+  }
+  function request(action, payload = {}, source = 'main', trigger = null) {
     if (!allowed.has(action)) return null;
     if (action !== 'ui.ready' && action !== 'setInspectorVisible' && action !== 'dismissMenu') {
       const audio = document.getElementById('pipo-click');
@@ -61,10 +68,21 @@
     }
     const generatedID = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const outbound = { ...payload, requestID: generatedID, revision };
-    const nativeID = nativeBridge?.request ? nativeBridge.request(action, outbound) : null;
+    setActionPending(trigger, true);
+    let nativeID = null;
+    try { nativeID = nativeBridge?.request ? nativeBridge.request(action, outbound) : null; }
+    catch (_) { setActionPending(trigger, false); showToast('Pipo could not complete that action.', source); return null; }
     const requestID = typeof nativeID === 'string' && nativeID ? nativeID : generatedID;
     const sourcePanel = source === 'inspector' ? document.getElementById('inspector-panel') : document.getElementById('main-panel');
-    requests.set(requestID, { action, payload: outbound, source: sourcePanel || source });
+    const timeoutMilliseconds = ['refresh', 'refreshSection', 'loadCourse'].includes(action) ? 70000 : 15000;
+    const timeoutID = window.setTimeout(() => {
+      const pending = requests.get(requestID); if (!pending) return;
+      requests.delete(requestID); setActionPending(pending.trigger, false);
+      if (pending.action === 'loadCourse') renderCourseLoadError(pending);
+      if (pending.action === 'setInspectorVisible') { const inspector = document.getElementById('inspector-panel'); if (inspector) { delete inspector.dataset.opening; delete inspector.dataset.openToken; } }
+      showToast('Pipo did not respond. Try again.', pending.source);
+    }, timeoutMilliseconds);
+    requests.set(requestID, { action, payload: outbound, source: sourcePanel || source, trigger, timeoutID });
     const message = { action, payload: { ...outbound, requestID } };
     window.dispatchEvent(new CustomEvent('pipo:request', { detail: { requestID, ...message } }));
     if (mode === 'demo') window.setTimeout(() => resolveResponse({ requestID, success: true }), 80);
@@ -72,13 +90,15 @@
   }
   function resolveResponse(response) {
     if (!response?.requestID || !requests.has(response.requestID)) return;
-    const pending = requests.get(response.requestID); requests.delete(response.requestID);
+    const pending = requests.get(response.requestID); requests.delete(response.requestID); window.clearTimeout(pending?.timeoutID); setActionPending(pending?.trigger, false);
     if (pending?.action === 'loadCourse' && response.data) {
       const target = String(response.targetID || pending.payload?.courseID || ''); const selected = String(selectedItem?.id || selectedItem?.courseID || ''); const inspector = document.getElementById('inspector-panel');
       const responseRevision = Number(response.revision ?? pending.payload?.revision ?? 0);
       const inspectorActive = inspector && (!inspector.classList.contains('hidden') || inspector.dataset.opening === 'true') && inspector.dataset.closing !== 'true';
-      if (inspectorActive && target && target === selected && responseRevision >= revision && responseRevision >= Number(pending.payload?.revision || 0)) renderCourseDetail(response.data);
+      const tokenMatches = Number(pending.payload?.openToken || 0) === Number(inspector?.dataset.openToken || 0);
+      if (inspectorActive && tokenMatches && target && target === selected && responseRevision >= revision && responseRevision >= Number(pending.payload?.revision || 0)) renderCourseDetail(response.data);
     }
+    if (pending?.action === 'loadCourse' && response.success === false) renderCourseLoadError(pending);
     if (pending?.action === 'setInspectorVisible' && pending.payload?.visible === true) {
       const inspector = document.getElementById('inspector-panel');
       if (response.success === false) {
@@ -88,11 +108,20 @@
       }
     }
     const labels = { refresh: 'Pipo refreshed', refreshSection: 'Section refreshed', markSeen: 'Marked as seen', undoSeen: 'Restored as unseen', snooze: 'Snoozed for one hour', openDestination: 'Opened in LMS', copyDetails: 'Details copied', addToCalendar: 'Added to Calendar', requestCalendarAccess: 'Calendar access updated', pinCourse: 'Course pinned', unpinCourse: 'Course unpinned', hideCourse: 'Course hidden', restoreCourse: 'Course restored', updateSettings: 'Settings saved', updateChannel: 'Update channel saved', clearCache: 'Saved dashboard cleared', checkForUpdates: 'Update check started', exportDiagnostics: 'Diagnostics exported', retrySecureStorage: 'Secure storage checked' };
-    if (response.success === false) showToast(response.error || 'Action failed', pending?.source);
+    if (response.success === false) showToast(meaningful(response.error) ? response.error : 'Action failed', pending?.source);
     else if (labels[pending?.action]) {
       // Native adapters may return function-shaped completion text. Keep UI copy human.
       showToast(labels[pending.action], pending?.source);
     }
+  }
+  function renderCourseLoadError(pending) {
+    const inspector = document.getElementById('inspector-panel');
+    const selected = String(selectedItem?.id || selectedItem?.courseID || '');
+    if (!inspector || inspector.classList.contains('hidden') || Number(pending?.payload?.openToken || 0) !== Number(inspector.dataset.openToken || 0) || String(pending?.payload?.courseID || '') !== selected) return;
+    const body = document.getElementById('inspector-body'); if (!body) return;
+    const message = el('div', 'text-neutral-300', 'Course details could not load.');
+    const retry = el('button', 'mt-2 text-rose-400 font-semibold', 'Retry'); retry.type = 'button'; retry.dataset.action = 'loadCourse'; retry.dataset.courseId = selected;
+    body.classList.remove('hidden'); body.replaceChildren(message, retry);
   }
   if (!nativeBridge?.request) window.pipo = { version: 1, available: false, mode, request };
   else window.pipo = Object.freeze({ ...nativeBridge, mode, request });
@@ -131,7 +160,7 @@
     document.getElementById('inspector-title').textContent = itemTitle(item);
     document.getElementById('inspector-subtitle').textContent = itemText(item) || (type === 'course' ? 'Course details' : 'LMS activity');
     const body = document.getElementById('inspector-body');
-    const detail = itemDetail(item) || (item?.detailStatus === 'redacted' ? 'Details are unavailable in the offline cache. Open this item in the LMS when connected.' : null);
+    const detail = shouldLoadCourse ? 'Loading course details…' : itemDetail(item) || (item?.detailStatus === 'redacted' ? 'Details are unavailable in the offline cache. Open this item in the LMS when connected.' : null);
     body.classList.toggle('hidden', !detail);
     body.replaceChildren(...(detail ? [el('div', 'text-neutral-200 leading-relaxed', detail)] : []));
     syncActivityDetails(type, item);
@@ -140,7 +169,7 @@
     const open = document.getElementById('inspector-open-label'); if (open) open.textContent = type === 'course' ? 'Open course in LMS' : 'Open item in LMS';
     const alreadyActive = !inspector.classList.contains('hidden') || inspector.dataset.opening === 'true';
     if (alreadyActive) {
-      if (shouldLoadCourse) request('loadCourse', { courseID: item?.id });
+      if (shouldLoadCourse) request('loadCourse', { courseID: item?.id, openToken: inspectorOpenToken });
       return;
     }
     const openToken = ++inspectorOpenToken;
@@ -148,7 +177,7 @@
     inspector.dataset.openToken = String(openToken);
     inspector.setAttribute('aria-hidden', 'true');
     request('setInspectorVisible', { visible: true, itemID: item?.id || null, openToken });
-    if (shouldLoadCourse) request('loadCourse', { courseID: item?.id });
+    if (shouldLoadCourse) request('loadCourse', { courseID: item?.id, openToken });
     if (!nativeBridge?.request && mode !== 'demo') revealInspector(openToken);
   }
   function syncActivityDetails(type, item) {
@@ -157,10 +186,10 @@
     block?.classList.toggle('hidden', !isActivity);
     if (!isActivity) return;
     const values = {
-      'activity-course': courseNameFor(item) || 'Course not supplied',
+      'activity-course': courseNameFor(item) || 'Course unavailable',
       'activity-instructor': window.pipoMenuHelpers?.instructorFor(item) || 'Instructor unavailable',
-      'activity-kind': valueFor(item, 'kind') || type,
-      'activity-due': dateText(item) || 'No date supplied'
+      'activity-kind': valueFor(item, 'kind') || 'Activity',
+      'activity-due': dateText(item) || 'Date unavailable'
     };
     Object.entries(values).forEach(([id, value]) => { const node = document.getElementById(id); if (node) node.textContent = value; });
   }
@@ -277,21 +306,25 @@
     wrap.dataset.sectionKey = key;
     const headingLabel = el('span', 'flex items-center gap-2', title); const headingIcon = el('i', 'fa-solid fa-chevron-up text-[10px] text-neutral-500 group-hover:text-neutral-300 transition-transform'); heading.append(headingLabel, headingIcon);
     const content = el('div', 'space-y-1.5'); content.dataset.sectionContent = key;
+    const presentation = window.pipoMenuHelpers?.sectionPresentation(status, title, items?.length || 0) || { kind: items?.length ? 'content' : 'empty', text: `No ${title.toLowerCase()}`, retry: false };
     if (items?.length) items.forEach(item => content.append(itemCard(item, type)));
-    else if (status === 'loading') content.append(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-400 animate-pulse', `Loading ${title.toLowerCase()}…`));
-    else content.append(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-400', `No ${title.toLowerCase()}`));
+    else {
+      const stateCard = el('div', `mac-card rounded-xl p-2.5 text-xs ${presentation.kind === 'error' ? 'text-rose-300' : 'text-neutral-400'}${presentation.kind === 'loading' ? ' animate-pulse' : ''}`, presentation.text);
+      if (presentation.retry) { const retry = el('button', 'mt-2 block text-rose-400 font-semibold', 'Retry'); retry.type = 'button'; retry.dataset.action = 'refreshSection'; retry.dataset.section = key; stateCard.append(retry); }
+      content.append(stateCard);
+    }
     heading.id = `section-${key}-toggle`; content.id = `section-${key}-content`; heading.setAttribute('aria-controls', content.id);
     heading.addEventListener('click', () => { const collapsed = content.hidden = !content.hidden; heading.setAttribute('aria-expanded', String(!collapsed)); headingIcon.classList.toggle('fa-chevron-up', !collapsed); headingIcon.classList.toggle('fa-chevron-down', collapsed); }); wrap.append(heading, content); return wrap;
   }
   function uniqueItems(items) {
     const seen = new Set();
-    return (items || []).filter(item => { const id = String(item?.entityKey || item?.id || `${itemTitle(item)}:${dateText(item) || ''}`); if (seen.has(id)) return false; seen.add(id); return true; });
+    return safeArray(items).filter(item => { const id = String(item?.entityKey || item?.id || `${itemTitle(item)}:${dateText(item) || ''}`); if (seen.has(id)) return false; seen.add(id); return true; });
   }
   function reconcileCards(container, items, type, status = 'ready') {
     const focusedKey = document.activeElement?.dataset?.entityKey;
     const existing = new Map([...container.querySelectorAll('[data-entity-key]')].map(node => [node.dataset.entityKey, node]));
-    const nodes = items.map(item => { const id = String(item?.entityKey || item?.id || ''); const signature = JSON.stringify(item); const current = existing.get(id); if (current?.dataset.signature === signature) { existing.delete(id); return current; } const card = itemCard(item, type); card.dataset.signature = signature; return card; });
-    if (!nodes.length) nodes.push(el('div', 'mac-card rounded-xl p-3 text-xs text-neutral-400', status === 'loading' ? 'Loading courses…' : 'No courses available'));
+    const nodes = safeArray(items).map(item => { const id = String(item?.entityKey || item?.id || ''); const signature = JSON.stringify(item); const current = existing.get(id); if (current?.dataset.signature === signature) { existing.delete(id); return current; } const card = itemCard(item, type); card.dataset.signature = signature; return card; });
+    if (!nodes.length) { const presentation = window.pipoMenuHelpers?.sectionPresentation(status, 'Courses', 0) || { kind: 'empty', text: 'No courses available', retry: false }; const card = el('div', `mac-card rounded-xl p-3 text-xs ${presentation.kind === 'error' ? 'text-rose-300' : 'text-neutral-400'}${presentation.kind === 'loading' ? ' animate-pulse' : ''}`, presentation.text === 'No courses' ? 'No courses available' : presentation.text); if (presentation.retry) { const retry = el('button', 'mt-2 block text-rose-400 font-semibold', 'Retry'); retry.type = 'button'; retry.dataset.action = 'refresh'; card.append(retry); } nodes.push(card); }
     container.replaceChildren(...nodes);
     if (focusedKey) container.querySelector(`[data-entity-key="${CSS.escape(focusedKey)}"]`)?.focus({ preventScroll: true });
   }
@@ -299,22 +332,22 @@
     const today = document.getElementById('view-today'); const courses = document.getElementById('view-courses');
     if (today && !todayShellReady) { const greeting = el('h2', 'text-sm font-bold text-white tracking-tight'); greeting.id = 'today-greeting'; const notices = el('div', 'space-y-2'); notices.id = 'today-notices'; const sections = el('div', 'space-y-3'); sections.id = 'today-sections'; today.replaceChildren(greeting, notices, sections); todayShellReady = true; }
     const greeting = document.getElementById('today-greeting'); if (greeting) greeting.textContent = `${documentGreeting}${state.studentName ? `, ${state.studentName}` : ''}`;
-    const notices = document.getElementById('today-notices'); if (notices) { const nodes = []; if (state.phase === 'failed') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-rose-400', state.errorMessage || 'Pipo could not load your LMS.')); else if (state.phase === 'offline') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Showing saved LMS data. Some private details require a live connection.')); else if (state.phase === 'loading' || state.phase === 'authenticating') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 animate-pulse', 'Connecting to your LMS…')); if (state.failures?.length) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections could not refresh.')); notices.replaceChildren(...nodes); }
+    const notices = document.getElementById('today-notices'); if (notices) { const nodes = []; if (state.phase === 'failed') { const card = el('div', 'mac-card rounded-xl p-2.5 text-xs text-rose-400', meaningful(state.errorMessage) ? state.errorMessage : 'Pipo could not load your LMS.'); const retry = el('button', 'mt-2 block font-semibold', 'Retry'); retry.type = 'button'; retry.dataset.action = 'refresh'; card.append(retry); nodes.push(card); } else if (state.phase === 'offline') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Showing saved LMS data. Some private details require a live connection.')); else if (state.phase === 'loading' || state.phase === 'authenticating') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 animate-pulse', 'Connecting to your LMS…')); if (state.failures?.length) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections could not refresh.')); notices.replaceChildren(...nodes); }
     const consumed = new Set(); const consume = items => uniqueItems(items).filter(item => { const key = String(item?.entityKey || item?.id || ''); if (key && consumed.has(key)) return false; if (key) consumed.add(key); return true; });
     const definitions = [
-      ['Up next', 'nextUp', consume(state.nextUp || []), 'activity'], ['Due soon', 'dueSoon', consume(state.dueSoon || []), 'assignment'],
-      ['Schedule', 'schedule', consume(state.schedule || []), 'activity'], ['New assignments', 'newAssignments', consume(state.newAssignments || []), 'assignment'],
-      ['Notifications', 'notifications', consume(state.notifications || []), 'notification'],
-      ['Messages', 'messages', consume(state.messages || []), 'message'], ['Grade feedback', 'gradeFeedback', consume(state.gradeFeedback || []), 'grade'],
-      ['Announcements', 'announcements', consume(state.announcements || []), 'announcement'], ['Resources', 'resources', consume(state.resources || []), 'resource']
+      ['Up next', 'nextUp', consume(safeArray(state.nextUp)), 'activity'], ['Due soon', 'dueSoon', consume(safeArray(state.dueSoon)), 'assignment'],
+      ['Schedule', 'schedule', consume(safeArray(state.schedule)), 'activity'], ['New assignments', 'newAssignments', consume(safeArray(state.newAssignments)), 'assignment'],
+      ['Notifications', 'notifications', consume(safeArray(state.notifications)), 'notification'],
+      ['Messages', 'messages', consume(safeArray(state.messages)), 'message'], ['Grade feedback', 'gradeFeedback', consume(safeArray(state.gradeFeedback)), 'grade'],
+      ['Announcements', 'announcements', consume(safeArray(state.announcements)), 'announcement'], ['Resources', 'resources', consume(safeArray(state.resources)), 'resource']
     ];
     const sectionsRoot = document.getElementById('today-sections');
-    definitions.forEach(([title, key, items, type]) => { const status = state.sectionStatuses?.[key]?.status || 'ready'; const existing = sectionsRoot?.querySelector(`[data-section-key="${key}"]`); const original = state[key] || []; if (status === 'unsupported' || (original.length > 0 && items.length === 0)) { existing?.remove(); sectionSignatures.delete(key); return; } const signature = JSON.stringify([items, status]); if (sectionSignatures.get(key) === signature && existing) return; const collapsed = existing?.querySelector('button')?.getAttribute('aria-expanded') === 'false'; const replacement = section(title, key, items, type, status, collapsed); if (collapsed) { const content = replacement.querySelector('[data-section-content]'); const button = replacement.querySelector('button'); const icon = button?.querySelector('.fa-chevron-up'); if (content) content.hidden = true; button?.setAttribute('aria-expanded', 'false'); icon?.classList.remove('fa-chevron-up'); icon?.classList.add('fa-chevron-down'); } existing ? existing.replaceWith(replacement) : sectionsRoot?.append(replacement); sectionSignatures.set(key, signature); });
-    if (courses) reconcileCards(courses, state.courses || [], 'course', state.sectionStatuses?.courses?.status || 'ready');
+    definitions.forEach(([title, key, items, type]) => { const status = state.sectionStatuses?.[key]?.status || 'ready'; const existing = sectionsRoot?.querySelector(`[data-section-key="${key}"]`); const original = safeArray(state[key]); if (status === 'unsupported' || (original.length > 0 && items.length === 0)) { existing?.remove(); sectionSignatures.delete(key); return; } const signature = JSON.stringify([items, status]); if (sectionSignatures.get(key) === signature && existing) return; const collapsed = existing?.querySelector('button')?.getAttribute('aria-expanded') === 'false'; const replacement = section(title, key, items, type, status, collapsed); if (collapsed) { const content = replacement.querySelector('[data-section-content]'); const button = replacement.querySelector('button'); const icon = button?.querySelector('.fa-chevron-up'); if (content) content.hidden = true; button?.setAttribute('aria-expanded', 'false'); icon?.classList.remove('fa-chevron-up'); icon?.classList.add('fa-chevron-down'); } existing ? existing.replaceWith(replacement) : sectionsRoot?.append(replacement); sectionSignatures.set(key, signature); });
+    if (courses) reconcileCards(courses, safeArray(state.courses), 'course', state.sectionStatuses?.courses?.status || 'ready');
     const phase = state.phase || 'ready';
     document.documentElement.dataset.phase = phase;
     document.documentElement.dataset.hostMode = state.hostMode || (mode === 'demo' ? 'showcase' : 'menuBar');
-    const statusText = phase === 'offline' ? 'Offline cache' : phase === 'loading' || phase === 'authenticating' ? 'Connecting' : phase === 'failed' ? 'Sync failed' : state.failures?.length ? 'Partial sync' : 'Ready';
+    const statusText = phase === 'offline' ? 'Offline cache' : ['loading', 'authenticating', 'reconnecting'].includes(phase) ? 'Connecting' : phase === 'failed' ? 'Sync failed' : phase === 'partialFailure' || state.failures?.length ? 'Partial sync' : phase === 'empty' ? 'No LMS data' : 'Ready';
     const sync = document.getElementById('sync-status'); if (sync) sync.textContent = statusText;
     const syncDot = document.getElementById('sync-dot'); if (syncDot) syncDot.dataset.phase = phase === 'ready' && state.failures?.length ? 'offline' : phase;
     const syncButton = document.getElementById('sync-button'); if (syncButton) { syncButton.setAttribute('aria-label', `${statusText}. Refresh Pipo`); syncButton.setAttribute('aria-busy', String(phase === 'loading' || phase === 'authenticating')); }
@@ -332,7 +365,7 @@
   function syncCourseFilters(state) {
     const current = document.querySelector('.course-filter-btn')?.parentElement; if (!current) return;
     const all = el('button', 'course-filter-btn w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 text-[11px] truncate', 'All Courses'); all.dataset.courseFilter = 'all';
-    const buttons = [all, ...(state.courses || []).map(course => { const button = el('button', 'course-filter-btn w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-neutral-300 text-[11px] truncate', valueFor(course, 'shortName', 'short_name', 'name')); button.dataset.courseFilter = String(course.id).toLowerCase(); return button; })];
+    const buttons = [all, ...safeArray(state.courses).map(course => { const button = el('button', 'course-filter-btn w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-neutral-300 text-[11px] truncate', field(valueFor(course, 'shortName', 'short_name', 'name'), 'Course')); button.dataset.courseFilter = meaningful(course?.id) ? String(course.id).toLowerCase() : ''; return button; })];
     current.replaceChildren(...buttons); buttons.forEach(button => button.addEventListener('click', () => { tabState[activeTab].courseFilter = button.dataset.courseFilter; applyFilters(); dismissFilter(); }));
   }
   function syncSettings(state) {
@@ -383,11 +416,11 @@
     document.getElementById('filter-toggle')?.addEventListener('click', event => { const popover = document.getElementById('filter-popover'); const hidden = popover?.classList.toggle('hidden'); event.currentTarget.setAttribute('aria-expanded', String(!hidden)); });
     document.querySelectorAll('.cat-filter-btn').forEach(button => button.addEventListener('click', () => { const label = button.textContent.trim().toLowerCase(); tabState[activeTab].categoryFilter = label.startsWith('all') ? 'all' : label.replace(/s$/, ''); applyFilters(); dismissFilter(); }));
     const settingNames = ['notificationsEnabled', 'reminderDayBefore', 'reminderHourBefore', 'assignmentNotifications', 'announcementNotifications', 'messageNotifications', 'gradeNotifications'];
-    document.querySelectorAll('input.apple-switch').forEach((input, index) => { input.dataset.setting = input.dataset.setting || settingNames[index] || 'notificationsEnabled'; input.addEventListener('change', () => request('updateSettings', { [input.dataset.setting]: input.checked })); });
-    document.querySelector('#view-settings input[type="range"]')?.addEventListener('change', event => request('updateSettings', { refreshMinutes: Number(event.target.value) }));
-    document.querySelectorAll('select').forEach(select => select.addEventListener('change', () => request('updateChannel', { channel: select.value })));
+    document.querySelectorAll('input.apple-switch').forEach((input, index) => { input.dataset.setting = input.dataset.setting || settingNames[index] || 'notificationsEnabled'; input.addEventListener('change', () => request('updateSettings', { [input.dataset.setting]: input.checked }, 'main', input)); });
+    document.querySelector('#view-settings input[type="range"]')?.addEventListener('change', event => request('updateSettings', { refreshMinutes: Number(event.target.value) }, 'main', event.target));
+    document.querySelectorAll('select').forEach(select => select.addEventListener('change', () => request('updateChannel', { channel: select.value }, 'main', select)));
     document.getElementById('inspector-back')?.addEventListener('click', closeInspectorSafe); document.getElementById('inspector-close')?.addEventListener('click', closeInspectorSafe);
-    document.addEventListener('click', event => { const menu = document.getElementById('item-context-menu'); if (!event.target.closest('#item-context-menu')) dismissMenu(); if (!event.target.closest('#filter-popover') && !event.target.closest('#filter-toggle')) dismissFilter(); const actionButton = event.target.closest('[data-action]'); if (!actionButton) return; const rawAction = actionButton.dataset.action; if (rawAction.startsWith('selectTab:')) return; if (rawAction === 'closeInspector') return closeInspectorSafe(); if (rawAction === 'clearCache' && !window.confirm('Clear the saved dashboard? Pipo will fetch it again on refresh.')) return; const itemID = selectedType === 'course' ? null : selectedItem?.id; const courseID = actionButton.dataset.courseId || (selectedType === 'course' ? (selectedItem?.id || selectedItem?.courseID) : null); const payload = actionButton.dataset.lmsRoot === 'true' ? { lmsRoot: true } : courseID ? { courseID } : itemID ? { itemID } : {}; const source = actionButton.closest('#inspector-panel') ? 'inspector' : 'main'; request(rawAction, payload, source); dismissMenu(); event.preventDefault(); event.stopImmediatePropagation(); }, true);
+    document.addEventListener('click', event => { const menu = document.getElementById('item-context-menu'); if (!event.target.closest('#item-context-menu')) dismissMenu(); if (!event.target.closest('#filter-popover') && !event.target.closest('#filter-toggle')) dismissFilter(); const actionButton = event.target.closest('[data-action]'); if (!actionButton) return; const rawAction = actionButton.dataset.action; if (rawAction.startsWith('selectTab:')) return; if (rawAction === 'closeInspector') return closeInspectorSafe(); if (rawAction === 'clearCache' && !window.confirm('Clear the saved dashboard? Pipo will fetch it again on refresh.')) return; const itemID = selectedType === 'course' ? null : selectedItem?.id; const courseID = actionButton.dataset.courseId || (selectedType === 'course' ? (selectedItem?.id || selectedItem?.courseID) : null); const payload = actionButton.dataset.lmsRoot === 'true' ? { lmsRoot: true } : rawAction === 'refreshSection' ? { section: actionButton.dataset.section } : rawAction === 'loadCourse' ? { courseID, openToken: inspectorOpenToken } : courseID ? { courseID } : itemID ? { itemID } : {}; const source = actionButton.closest('#inspector-panel') ? 'inspector' : 'main'; request(rawAction, payload, source, actionButton); dismissMenu(); event.preventDefault(); event.stopImmediatePropagation(); }, true);
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.preventDefault(); if (dismissMenu()) return; if (dismissFilter()) { document.getElementById('filter-toggle')?.focus(); return; } if (closeInspectorSafe()) return; request('dismissMenu'); return; }
       const inspector = document.getElementById('inspector-panel');
@@ -397,6 +430,7 @@
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     });
     window.addEventListener('resize', syncInspectorModality);
+    window.addEventListener('unhandledrejection', event => { event.preventDefault(); showToast('Pipo could not complete that action.'); window.dispatchEvent(new CustomEvent('pipo:error', { detail: event.reason })); });
   }
   window.pipoMenu = Object.freeze({ applyState, filterCards, request, switchTab, mode });
   window.addEventListener('message', event => { if (event.data?.type === 'pipo:state') applyState(event.data.state); if (event.data?.type === 'pipo:response') resolveResponse(event.data); });

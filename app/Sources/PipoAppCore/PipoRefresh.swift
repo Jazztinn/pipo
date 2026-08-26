@@ -120,6 +120,9 @@ public actor DashboardRefreshCoordinator {
             recordMetrics(snapshot, source: .network, started: started)
             return DashboardRefreshOutcome(snapshot: snapshot, source: .network, refreshedSections: requested.subtracting(preserved), preservedSections: preserved, coalesced: false)
         } catch {
+            if error is CancellationError || (error as? PipoCoreError) == .authenticationRequired {
+                throw error
+            }
             if let cached = try await cache.load() {
                 usedCachedResult = true
                 recordMetrics(cached, source: .staleCache, started: started)

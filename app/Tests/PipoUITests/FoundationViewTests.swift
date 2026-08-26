@@ -1,7 +1,56 @@
 import CoreGraphics
 import Foundation
+import AppKit
 import Testing
 @testable import PipoUI
+
+@Test
+@MainActor
+func bundledHollowPipoLogoLoads() {
+    let image = PipoBrandAssets.hollowLogo
+    #expect(image.size.width > 0)
+    #expect(image.size.height > 0)
+    #expect(PipoBrandAssets.hollowTemplateLogo.isTemplate)
+}
+
+@Test
+func legalAcknowledgementIsVersionedAndLocal() throws {
+    let suiteName = "PipoLegalTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    #expect(!PipoLegal.isAcknowledged(in: defaults))
+    #expect(!PipoLegal.isPreReleaseAcknowledged(in: defaults))
+    PipoLegal.setPreReleaseAcknowledged(true, in: defaults)
+    #expect(PipoLegal.isPreReleaseAcknowledged(in: defaults))
+    #expect(defaults.string(forKey: PipoLegal.preReleaseAcknowledgementKey) == PipoLegal.preReleaseVersion)
+    PipoLegal.setPreReleaseAcknowledged(false, in: defaults)
+    #expect(!PipoLegal.isPreReleaseAcknowledged(in: defaults))
+    PipoLegal.setAcknowledged(true, in: defaults)
+    #expect(PipoLegal.isAcknowledged(in: defaults))
+    #expect(defaults.string(forKey: PipoLegal.acknowledgementKey) == PipoLegal.currentVersion)
+    PipoLegal.setAcknowledged(false, in: defaults)
+    #expect(!PipoLegal.isAcknowledged(in: defaults))
+}
+
+@Test
+func legalDestinationsUsePackagedSafeHTTPSPages() {
+    #expect(PipoLegal.termsURL.scheme == "https")
+    #expect(PipoLegal.privacyURL.scheme == "https")
+    #expect(PipoLegal.termsURL.host == "pipo.jazztinn.me")
+    #expect(PipoLegal.privacyURL.host == "pipo.jazztinn.me")
+    #expect(PipoLegal.allowedExternalDestination(PipoLegal.termsURL) == PipoLegal.termsURL)
+    #expect(PipoLegal.allowedExternalDestination(PipoLegal.privacyURL) == PipoLegal.privacyURL)
+    #expect(PipoLegal.allowedExternalDestination(URL(string: "https://example.com/arbitrary")!) == nil)
+}
+
+@Test
+func bundledLegalDocumentsAreReadable() throws {
+    let license = try #require(PipoLegal.bundledDocument(named: "LICENSE", extension: "txt"))
+    let notices = try #require(PipoLegal.bundledDocument(named: "THIRD_PARTY_NOTICES", extension: "md"))
+    #expect(license.contains("MIT License"))
+    #expect(notices.contains("Third-Party"))
+}
 
 @Test
 func menuPanelGeometryKeepsMainPaneAnchoredWhenInspectorOpens() {

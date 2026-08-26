@@ -101,6 +101,12 @@ pub enum CoreError {
     Authentication(String),
     #[error("network request failed: {0}")]
     Network(String),
+    #[error("request timed out")]
+    Timeout,
+    #[error("LMS rate limit reached")]
+    RateLimited,
+    #[error("LMS service unavailable")]
+    ServiceUnavailable,
     #[error("invalid Moodle response: {0}")]
     Response(String),
     #[error("unsupported by this LMS: {0}")]
@@ -115,6 +121,9 @@ impl CoreError {
             Self::Input(_) | Self::Origin => "invalid_input",
             Self::Authentication(_) => "authentication_failed",
             Self::Network(_) => "network_failed",
+            Self::Timeout => "timeout",
+            Self::RateLimited => "rate_limited",
+            Self::ServiceUnavailable => "service_unavailable",
             Self::Response(_) => "invalid_response",
             Self::Unsupported(_) => "unsupported",
         }
@@ -123,12 +132,11 @@ impl CoreError {
 
 impl From<reqwest::Error> for CoreError {
     fn from(value: reqwest::Error) -> Self {
-        let detail = if value.is_timeout() {
-            "request timed out".to_owned()
+        if value.is_timeout() {
+            Self::Timeout
         } else {
-            value.without_url().to_string()
-        };
-        Self::Network(redact(&detail))
+            Self::Network(redact(&value.without_url().to_string()))
+        }
     }
 }
 
@@ -975,12 +983,15 @@ impl MoodleClient {
             .and_then(Value::as_str)
         {
             let message = redact(message);
-            if value
+            let code = value
                 .get("errorcode")
                 .and_then(Value::as_str)
-                .is_some_and(|code| matches!(code, "invalidtoken" | "invalidlogin"))
-            {
+                .unwrap_or_default();
+            if matches!(code, "invalidtoken" | "invalidlogin" | "accessexception") {
                 return Err(CoreError::Authentication(message));
+            }
+            if matches!(code, "ratelimit" | "too_many_requests") {
+                return Err(CoreError::RateLimited);
             }
             return Err(CoreError::Response(message));
         }
@@ -1151,6 +1162,17 @@ async fn parse_json_response(response: reqwest::Response, cap: usize) -> Result<
         bytes.extend_from_slice(&chunk);
     }
     if !status.is_success() {
+        if matches!(status.as_u16(), 401 | 403) {
+            return Err(CoreError::Authentication(
+                "LMS rejected the session".to_owned(),
+            ));
+        }
+        if status.as_u16() == 429 {
+            return Err(CoreError::RateLimited);
+        }
+        if status.is_server_error() {
+            return Err(CoreError::ServiceUnavailable);
+        }
         return Err(CoreError::Network(format!("LMS returned HTTP {status}")));
     }
     serde_json::from_slice(&bytes)
@@ -1334,22 +1356,19 @@ fn backfill_course_names(items: &mut [Value], courses: &[Value]) {
             continue;
         };
         let object = item.as_object_mut().expect("dashboard item object");
-        if needs_name {
-            if let Some(name) = course.get("name").and_then(Value::as_str) {
-                object.insert("course_name".to_owned(), Value::String(name.to_owned()));
-            }
+        if needs_name && let Some(name) = course.get("name").and_then(Value::as_str) {
+            object.insert("course_name".to_owned(), Value::String(name.to_owned()));
         }
         if object
             .get("instructor")
             .and_then(Value::as_str)
             .is_none_or(|value| value.trim().is_empty())
+            && let Some(instructor) = course.get("instructor").and_then(Value::as_str)
         {
-            if let Some(instructor) = course.get("instructor").and_then(Value::as_str) {
-                object.insert(
-                    "instructor".to_owned(),
-                    Value::String(instructor.to_owned()),
-                );
-            }
+            object.insert(
+                "instructor".to_owned(),
+                Value::String(instructor.to_owned()),
+            );
         }
     }
 }
@@ -1962,6 +1981,44 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, json!({"token":"test-token"}));
+    }
+    #[tokio::test]
+    async fn password_exchange_classifies_rate_limit() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/login/token.php"))
+            .respond_with(ResponseTemplate::new(429))
+            .mount(&server)
+            .await;
+        let client = MoodleClient::for_test(Url::parse(&server.uri()).unwrap()).unwrap();
+        assert!(matches!(
+            client.authenticate_with_password("alex", "secret").await,
+            Err(CoreError::RateLimited)
+        ));
+    }
+    #[tokio::test]
+    async fn password_exchange_classifies_http_auth_rejection() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/login/token.php"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+        let client = MoodleClient::for_test(Url::parse(&server.uri()).unwrap()).unwrap();
+        assert!(matches!(
+            client.authenticate_with_password("alex", "bad").await,
+            Err(CoreError::Authentication(_))
+        ));
+    }
+    #[test]
+    fn lifecycle_error_codes_are_stable() {
+        assert_eq!(CoreError::Timeout.code(), "timeout");
+        assert_eq!(CoreError::RateLimited.code(), "rate_limited");
+        assert_eq!(CoreError::ServiceUnavailable.code(), "service_unavailable");
+        assert_eq!(
+            CoreError::Authentication("expired".to_owned()).code(),
+            "authentication_failed"
+        );
     }
 
     #[test]

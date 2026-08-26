@@ -445,6 +445,85 @@ import Testing
     #expect(model.secureStorageStatus == .ready)
 }
 
+@MainActor
+@Test func duplicateSignInAttemptsCoalesce() async {
+    let transport = AuthenticationLifecycleTransport(snapshot: sampleSnapshot())
+    let tokenStore = TestTokenStore(token: nil)
+    let model = PipoModel(
+        transport: transport,
+        tokenStore: tokenStore,
+        refreshCoordinator: DashboardRefreshCoordinator(transport: transport, cache: InMemoryDashboardCache()),
+        notificationService: NoopNotificationService(),
+        urlOpener: { _ in }
+    )
+    async let first: Void = model.signIn(username: "alex", password: "secret")
+    async let second: Void = model.signIn(username: "alex", password: "secret")
+    _ = await (first, second)
+    #expect(await transport.authenticationCount == 1)
+    #expect(model.phase == .ready)
+}
+
+@MainActor
+@Test func expiredStoredTokenClearsSessionAndReturnsSignedOut() async {
+    let transport = ExpiredTokenTransport()
+    let tokenStore = TestTokenStore(token: "expired")
+    let model = PipoModel(
+        transport: transport,
+        tokenStore: tokenStore,
+        refreshCoordinator: DashboardRefreshCoordinator(transport: transport, cache: InMemoryDashboardCache()),
+        notificationService: NoopNotificationService(),
+        urlOpener: { _ in }
+    )
+    await model.restore()
+    #expect(model.phase == .signedOut)
+    #expect(tokenStore.value == nil)
+    #expect(model.authenticationError == "Your LMS session expired. Sign in again.")
+}
+
+@MainActor
+@Test func rejectedSchoolAccountExplainsHowToRecover() async {
+    let transport = ExpiredTokenTransport()
+    let model = PipoModel(
+        transport: transport,
+        tokenStore: TestTokenStore(token: nil),
+        refreshCoordinator: DashboardRefreshCoordinator(transport: transport, cache: InMemoryDashboardCache()),
+        notificationService: NoopNotificationService(),
+        urlOpener: { _ in }
+    )
+    await model.signIn(username: "alex", password: "wrong")
+    #expect(model.phase == .failed("The LMS rejected that username or password. Check your details and try again."))
+}
+
+@MainActor
+@Test func rejectedAccessTokenExplainsHowToRecover() async {
+    let transport = ExpiredTokenTransport()
+    let model = PipoModel(
+        transport: transport,
+        tokenStore: TestTokenStore(token: nil),
+        refreshCoordinator: DashboardRefreshCoordinator(transport: transport, cache: InMemoryDashboardCache()),
+        notificationService: NoopNotificationService(),
+        urlOpener: { _ in }
+    )
+    await model.signIn(withToken: "expired")
+    #expect(model.phase == .failed("That access token is invalid or expired. Create a new token and try again."))
+}
+
+@MainActor
+@Test func networkFailureRetainsStoredTokenForReconnect() async {
+    let transport = NetworkFailureTransport()
+    let tokenStore = TestTokenStore(token: "valid")
+    let model = PipoModel(
+        transport: transport,
+        tokenStore: tokenStore,
+        refreshCoordinator: DashboardRefreshCoordinator(transport: transport, cache: InMemoryDashboardCache()),
+        notificationService: NoopNotificationService(),
+        urlOpener: { _ in }
+    )
+    await model.restore()
+    #expect(model.phase == .failed("Pipo could not reach the LMS. Check your connection and try again."))
+    #expect(tokenStore.value == "valid")
+}
+
 private func sampleSnapshot() -> DashboardSnapshot {
     DashboardSnapshot(generatedAt: "now", siteName: "LPU", studentName: "Alex", sections: DashboardSections(), courses: [Course(id: 12, name: "History")])
 }
@@ -483,6 +562,29 @@ private actor CountingSnapshotTransport: PipoSidecarTransport {
         let value = try JSONDecoder().decode(PipoJSONValue.self, from: JSONEncoder().encode(snapshot))
         return SidecarResponse(version: request.version, id: request.id, result: value, error: nil)
     }
+}
+
+private actor AuthenticationLifecycleTransport: PipoSidecarTransport {
+    let snapshot: DashboardSnapshot
+    private(set) var authenticationCount = 0
+    init(snapshot: DashboardSnapshot) { self.snapshot = snapshot }
+    func send(_ request: SidecarRequest) async throws -> SidecarResponse {
+        if request.method == "authenticate_with_password" {
+            authenticationCount += 1
+            try await Task.sleep(for: .milliseconds(40))
+            return SidecarResponse(version: request.version, id: request.id, result: .object(["token": .string("valid")]), error: nil)
+        }
+        let value = try JSONDecoder().decode(PipoJSONValue.self, from: JSONEncoder().encode(snapshot))
+        return SidecarResponse(version: request.version, id: request.id, result: value, error: nil)
+    }
+}
+
+private struct ExpiredTokenTransport: PipoSidecarTransport {
+    func send(_ request: SidecarRequest) async throws -> SidecarResponse { throw PipoCoreError.authenticationRequired }
+}
+
+private struct NetworkFailureTransport: PipoSidecarTransport {
+    func send(_ request: SidecarRequest) async throws -> SidecarResponse { throw PipoCoreError.networkUnavailable }
 }
 
 private actor CountingCourseTransport: PipoSidecarTransport {

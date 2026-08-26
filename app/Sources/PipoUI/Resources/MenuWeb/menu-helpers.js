@@ -45,5 +45,20 @@
     return instructorFromCourseTitle(item?.courseName ?? item?.course_name) || 'Instructor unavailable';
   }
 
-  global.pipoMenuHelpers = Object.freeze({ chooseGreeting, greetingPeriod, greetingsForHour, instructorFor, instructorFromCourseTitle });
+  function safeDisplay(value, fallback) {
+    if (value == null || value === false) return fallback;
+    const text = String(value).trim();
+    if (!text || ['null', 'undefined', 'not supplied'].includes(text.toLowerCase())) return fallback;
+    return text;
+  }
+
+  function sectionPresentation(status, title, count = 0) {
+    if (count > 0) return Object.freeze({ kind: 'content', text: '', retry: false });
+    const normalized = String(status || 'ready').toLowerCase();
+    if (normalized === 'loading') return Object.freeze({ kind: 'loading', text: `Loading ${title.toLowerCase()}…`, retry: false });
+    if (['failed', 'error', 'partialfailure', 'partial_failure'].includes(normalized)) return Object.freeze({ kind: 'error', text: `${title} could not load.`, retry: true });
+    return Object.freeze({ kind: 'empty', text: `No ${title.toLowerCase()}`, retry: false });
+  }
+
+  global.pipoMenuHelpers = Object.freeze({ chooseGreeting, greetingPeriod, greetingsForHour, instructorFor, instructorFromCourseTitle, safeDisplay, sectionPresentation });
 })(window);

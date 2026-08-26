@@ -11,7 +11,7 @@ if ! xcodebuild -version >/dev/null 2>&1; then
 fi
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Legal" "$APP/Contents/Frameworks"
 
 cargo build --manifest-path "$ROOT/rust/Cargo.toml" --release --bin pipo-core
 swift build --package-path "$ROOT" -c release
@@ -21,6 +21,10 @@ cp "$ROOT/.build/release/PipoApp" "$APP/Contents/MacOS/PipoApp"
 cp "$ROOT/rust/target/release/pipo-core" "$APP/Contents/MacOS/pipo-core"
 cp "$ROOT/app/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/app/Resources/PipoIcon.png" "$APP/Contents/Resources/PipoIcon.png"
+cp "$ROOT/LICENSE" "$APP/Contents/Resources/Legal/LICENSE.txt"
+cp "$ROOT/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/Legal/THIRD_PARTY_NOTICES.md"
+test -s "$APP/Contents/Resources/Legal/LICENSE.txt"
+test -s "$APP/Contents/Resources/Legal/THIRD_PARTY_NOTICES.md"
 
 PIPO_UI_BUNDLE="$SWIFT_BIN_PATH/Pipo_PipoUI.bundle"
 if [ ! -d "$PIPO_UI_BUNDLE/MenuWeb" ]; then

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public enum PipoJSONValue: Codable, Equatable, Sendable {
     case string(String)
@@ -88,7 +89,8 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
                 try startIfNeeded()
                 guard let stdin, let stdout else { throw PipoCoreError.sidecarUnavailable }
                 stdin.write(try JSONEncoder().encode(request) + Data([0x0A]))
-                let line = try readLine(from: stdout)
+                let timeout: TimeInterval = ["refresh_dashboard", "load_course"].contains(request.method) ? 65 : 25
+                let line = try readLine(from: stdout, timeout: timeout)
                 let response = try JSONDecoder().decode(SidecarResponse.self, from: line)
                 try response.validate(for: request)
                 validResponse = response
@@ -96,16 +98,22 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
             } catch {
                 finalError = error
                 stopSession()
-                if attempt == 1 { break }
+                if attempt == 1 || !Self.shouldRetryTransport(error) { break }
             }
         }
         guard let response = validResponse else { throw finalError }
-        if let failure = response.error { throw PipoCoreError.operationFailed(failure.message) }
+        if let failure = response.error { throw failure.classifiedError }
         return response
     }
 
     public func shutdown() {
         stopSession()
+    }
+
+    private static func shouldRetryTransport(_ error: Error) -> Bool {
+        guard !Task.isCancelled else { return false }
+        guard let error = error as? PipoCoreError else { return true }
+        return error == .sidecarUnavailable || error == .invalidResponse
     }
 
     private func startIfNeeded() throws {
@@ -130,12 +138,23 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
         }
     }
 
-    private func readLine(from handle: FileHandle) throws -> Data {
+    private func readLine(from handle: FileHandle, timeout: TimeInterval) throws -> Data {
+        let timeoutNanoseconds = UInt64(max(timeout, 1) * 1_000_000_000)
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
         while true {
             if let newline = stdoutBuffer.firstIndex(of: 0x0A) {
                 let line = Data(stdoutBuffer[..<newline])
                 stdoutBuffer.removeSubrange(...newline)
                 return line
+            }
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < deadline else { throw PipoCoreError.timedOut }
+            var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
+            let remainingMilliseconds = Int32(min((deadline - now) / 1_000_000, UInt64(Int32.max)))
+            let ready = Darwin.poll(&descriptor, 1, remainingMilliseconds)
+            guard ready > 0 else {
+                if ready == 0 { throw PipoCoreError.timedOut }
+                throw PipoCoreError.sidecarUnavailable
             }
             guard let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty else { throw PipoCoreError.invalidResponse }
             stdoutBuffer.append(chunk)
@@ -158,6 +177,20 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
     nonisolated private static func defaultExecutableURL() -> URL {
         if let configured = ProcessInfo.processInfo.environment["PIPO_CORE_PATH"], !configured.isEmpty { return URL(fileURLWithPath: configured) }
         return Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/pipo-core")
+    }
+}
+
+private extension SidecarFailure {
+    var classifiedError: PipoCoreError {
+        switch code {
+        case "authentication_failed": .authenticationRequired
+        case "network_failed": .networkUnavailable
+        case "timeout": .timedOut
+        case "rate_limited": .rateLimited
+        case "invalid_response": .malformedServiceResponse
+        case "service_unavailable": .serviceUnavailable
+        default: .operationFailed(PipoSecrets.redact(message))
+        }
     }
 }
 

@@ -38,9 +38,7 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
 
     private func configureStatusItem() {
         guard let button = statusItem.button else { return }
-        let image = NSImage(systemSymbolName: "flag", accessibilityDescription: "Pipo")
-        image?.isTemplate = true
-        button.image = image
+        button.image = PipoBrandAssets.hollowTemplateLogo
         button.imagePosition = .imageOnly
         button.toolTip = "Pipo"
         button.target = self
@@ -85,6 +83,7 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         hostingView.frame = CGRect(origin: .zero, size: PipoMenuPanelGeometry.compactSize)
         hostingView.autoresizingMask = [.width, .height]
         hostingView.wantsLayer = true
+        hostingView.layer?.isOpaque = false
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = hostingView
     }

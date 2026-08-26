@@ -40,6 +40,17 @@ test("instructor prefers field, then strict course-title suffix, then fallback",
   assert.equal(helper.instructorFor({ title: "Assignment (Professor Fake)" }), "Instructor unavailable");
 });
 
+test("missing LMS values and section phases have safe presentations", async () => {
+  const helper = await loadHelpers();
+  for (const missing of [null, undefined, false, "", "null", "undefined", "Not supplied"]) {
+    assert.equal(helper.safeDisplay(missing, "Value unavailable"), "Value unavailable");
+  }
+  assert.deepEqual({ ...helper.sectionPresentation("loading", "Messages") }, { kind: "loading", text: "Loading messages…", retry: false });
+  assert.deepEqual({ ...helper.sectionPresentation("failed", "Messages") }, { kind: "error", text: "Messages could not load.", retry: true });
+  assert.deepEqual({ ...helper.sectionPresentation("ready", "Messages") }, { kind: "empty", text: "No messages", retry: false });
+  assert.deepEqual({ ...helper.sectionPresentation("failed", "Messages", 1) }, { kind: "content", text: "", retry: false });
+});
+
 test("runtime chooses one document greeting outside render loop", async () => {
   const runtime = await readFile(resolve(import.meta.dirname, "../../app/Sources/PipoUI/Resources/MenuWeb/menu.js"), "utf8");
   const html = await readFile(resolve(import.meta.dirname, "../../app/Sources/PipoUI/Resources/MenuWeb/index.html"), "utf8");
@@ -48,4 +59,20 @@ test("runtime chooses one document greeting outside render loop", async () => {
   assert.match(html, /id="today-greeting"/);
   assert.match(runtime, /`\$\{documentGreeting\}\$\{state\.studentName/);
   assert.match(runtime, /instructorFor\(item\).*Instructor unavailable/);
+});
+
+test("runtime exposes complete async states and stale-response guards", async () => {
+  const runtime = await readFile(resolve(import.meta.dirname, "../../app/Sources/PipoUI/Resources/MenuWeb/menu.js"), "utf8");
+  assert.match(runtime, /setActionPending\(trigger, true\)/);
+  assert.match(runtime, /setActionPending\(pending\?\.trigger, false\)/);
+  assert.match(runtime, /Pipo did not respond\. Try again\./);
+  assert.match(runtime, /Course details could not load\./);
+  assert.match(runtime, /dataset\.action = 'refreshSection'/);
+  assert.match(runtime, /dataset\.action = 'loadCourse'/);
+  assert.match(runtime, /tokenMatches/);
+  assert.match(runtime, /responseRevision >= revision/);
+  assert.match(runtime, /requests\.has\(response\.requestID\)/);
+  assert.match(runtime, /addEventListener\('unhandledrejection'/);
+  assert.match(runtime, /event\.preventDefault\(\)/);
+  assert.doesNotMatch(runtime, /Course not supplied|No date supplied/);
 });

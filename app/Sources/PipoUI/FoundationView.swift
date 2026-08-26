@@ -502,15 +502,8 @@ public struct PipoUIConfiguration {
                 try await model.loadCourse(id: courseID)
             },
             openURL: { url in
-                Task { @MainActor in
-                    await model.openURL(for: DashboardItem(
-                        id: url.absoluteString,
-                        kind: "destination",
-                        title: "LMS destination",
-                        courseName: "LPU Cavite LMS",
-                        destination: url.absoluteString
-                    ))
-                }
+                guard let destination = PipoLegal.allowedExternalDestination(url) else { return }
+                NSWorkspace.shared.open(destination)
             },
             installUpdate: installUpdate,
             clearCache: { await model.clearCache() },
@@ -789,30 +782,36 @@ public struct PipoRootView: View {
     public var body: some View {
         let visiblePhase = configuration.modelBacked ? phase(for: model.phase) : phase
         Group {
-            switch visiblePhase {
-            case .onboarding:
+            if hostMode == .window {
+                PipoSettingsCenterView(
+                    model: model,
+                    configuration: configuration,
+                    onSignOut: { isSignOutConfirmationPresented = true }
+                )
+            } else {
+                switch visiblePhase {
+                case .onboarding:
                 PipoOnboardingView(
+                    transparentOuterHost: true,
                     onPasswordSignIn: signInWithPassword,
                     onTokenSignIn: signInWithToken,
                     onOpenURL: openURL
                 )
             case .loading:
-                PipoGlassStatusView(title: "Connecting to LPU Cavite LMS", systemImage: "arrow.triangle.2.circlepath")
+                PipoGlassStatusView(
+                    title: "Connecting to LPU Cavite LMS",
+                    systemImage: "arrow.triangle.2.circlepath",
+                    transparentOuterHost: true
+                )
             case .failed(let message):
                 PipoOnboardingView(
                     externalError: message,
+                    transparentOuterHost: true,
                     onPasswordSignIn: signInWithPassword,
                     onTokenSignIn: signInWithToken,
                     onOpenURL: openURL
                 )
-            default:
-                if hostMode == .window {
-                    PipoSettingsCenterView(
-                        model: model,
-                        configuration: configuration,
-                        onSignOut: { isSignOutConfirmationPresented = true }
-                    )
-                } else {
+                default:
                     PipoWebMenuView(
                         model: model,
                         configuration: configuration,
@@ -932,6 +931,7 @@ public struct PipoRootView: View {
 private struct PipoGlassStatusView: View {
     let title: String
     let systemImage: String
+    var transparentOuterHost = false
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: systemImage).font(.system(size: 28, weight: .semibold)).foregroundStyle(PipoPalette.rose)
@@ -941,7 +941,7 @@ private struct PipoGlassStatusView: View {
         .padding(28)
         .pipoGlassPane(cornerRadius: 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(PipoPalette.canvas)
+        .background(transparentOuterHost ? Color.clear : PipoPalette.canvas)
     }
 }
 
@@ -952,7 +952,10 @@ private struct PipoOnboardingView: View {
     @State private var password = ""
     @State private var token = ""
     @State private var validationMessage: String?
+    @AppStorage(PipoLegal.acknowledgementKey) private var acceptedLegalVersion = ""
+    @AppStorage(PipoLegal.preReleaseAcknowledgementKey) private var acceptedPreReleaseVersion = ""
     var externalError: String? = nil
+    var transparentOuterHost = false
     let onPasswordSignIn: (String, String) -> Void
     let onTokenSignIn: (String) -> Void
     let onOpenURL: (URL) -> Void
@@ -961,9 +964,10 @@ private struct PipoOnboardingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .top) {
-                    Image(systemName: "flag.fill")
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(PipoPalette.rose)
+                    Image(nsImage: PipoBrandAssets.hollowLogo)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 44, height: 44)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Pipo")
@@ -974,6 +978,10 @@ private struct PipoOnboardingView: View {
                     Spacer(minLength: 0)
                 }
 
+                if acceptedPreReleaseVersion != PipoLegal.preReleaseVersion {
+                    PipoPreReleaseNoticeView()
+                } else {
+                Group {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Connect to LPU Cavite LMS")
                         .font(.headline)
@@ -990,6 +998,11 @@ private struct PipoOnboardingView: View {
                 }
                 .pickerStyle(.segmented)
 
+                if acceptedLegalVersion != PipoLegal.currentVersion {
+                    PipoLegalAcknowledgementView(openURL: onOpenURL)
+                }
+                .onChange(of: authMethod) { _, _ in validationMessage = nil }
+
                 if authMethod == .schoolAccount {
                     VStack(alignment: .leading, spacing: 12) {
                         TextField("LMS username", text: $username)
@@ -1005,6 +1018,7 @@ private struct PipoOnboardingView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(PipoPalette.rose)
                         .keyboardShortcut(.defaultAction)
+                        .disabled(acceptedLegalVersion != PipoLegal.currentVersion)
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
@@ -1017,6 +1031,7 @@ private struct PipoOnboardingView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(PipoPalette.rose)
                         .keyboardShortcut(.defaultAction)
+                        .disabled(acceptedLegalVersion != PipoLegal.currentVersion)
                     }
                 }
 
@@ -1046,6 +1061,8 @@ private struct PipoOnboardingView: View {
                 }
                 .buttonStyle(.link)
                 .help("Open the school LMS in your browser")
+                }
+                }
             }
             .padding(24)
             .foregroundStyle(.white)
@@ -1054,11 +1071,20 @@ private struct PipoOnboardingView: View {
             .padding(20)
         }
         .scrollIndicators(.hidden)
-        .background(PipoPalette.canvas)
+        .scrollContentBackground(.hidden)
+        .background(transparentOuterHost ? Color.clear : PipoPalette.canvas)
         .preferredColorScheme(.dark)
     }
 
     private func submitPassword() {
+        guard acceptedPreReleaseVersion == PipoLegal.preReleaseVersion else {
+            validationMessage = "Continue through the Pre-Release & Permissions notice first."
+            return
+        }
+        guard acceptedLegalVersion == PipoLegal.currentVersion else {
+            validationMessage = "Acknowledge the Terms of Use and Privacy Policy to continue."
+            return
+        }
         guard !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             validationMessage = "Enter your LMS username."
             return
@@ -1074,6 +1100,14 @@ private struct PipoOnboardingView: View {
     }
 
     private func submitToken() {
+        guard acceptedPreReleaseVersion == PipoLegal.preReleaseVersion else {
+            validationMessage = "Continue through the Pre-Release & Permissions notice first."
+            return
+        }
+        guard acceptedLegalVersion == PipoLegal.currentVersion else {
+            validationMessage = "Acknowledge the Terms of Use and Privacy Policy to continue."
+            return
+        }
         guard !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             validationMessage = "Paste an access token to continue."
             return
@@ -1185,7 +1219,10 @@ private struct PipoWorkspaceView: View {
                         Button("Sign out", role: .destructive, action: onSignOut)
                         Button("Quit Pipo") { NSApplication.shared.terminate(nil) }
                     } label: {
-                        Image(systemName: "flag.fill")
+                        Image(nsImage: PipoBrandAssets.hollowTemplateLogo)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 16, height: 16)
                     }
                     .help("Pipo menu")
                     .accessibilityLabel("Pipo menu")

@@ -28,6 +28,8 @@ let package = Package(
             path: "app/Sources/PipoUI",
             resources: [
                 .copy("Resources/MenuWeb"),
+                .copy("Resources/PipoLogoHollow.png"),
+                .copy("Resources/Legal"),
             ]
         ),
         .executableTarget(

@@ -607,6 +607,12 @@ public enum PipoCoreError: LocalizedError, Equatable, Sendable {
     case sidecarUnavailable
     case invalidResponse
     case originRejected
+    case networkUnavailable
+    case timedOut
+    case authenticationRequired
+    case rateLimited
+    case malformedServiceResponse
+    case serviceUnavailable
     case operationFailed(String)
 
     public var errorDescription: String? {
@@ -614,6 +620,12 @@ public enum PipoCoreError: LocalizedError, Equatable, Sendable {
         case .sidecarUnavailable: return "Pipo Core is unavailable."
         case .invalidResponse: return "Pipo Core returned an invalid response."
         case .originRejected: return "The destination is outside the LPU LMS origin."
+        case .networkUnavailable: return "Pipo could not reach the LMS. Check your connection and try again."
+        case .timedOut: return "The LMS took too long to respond. Try again."
+        case .authenticationRequired: return "Your LMS session expired. Sign in again."
+        case .rateLimited: return "The LMS is busy. Pipo will retry shortly."
+        case .malformedServiceResponse: return "The LMS returned an unreadable response."
+        case .serviceUnavailable: return "The LMS is temporarily unavailable."
         case .operationFailed(let message): return PipoSecrets.redact(message)
         }
     }

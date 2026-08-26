@@ -36,6 +36,7 @@ public final class PipoModel {
     @ObservationIgnored private var hasLoadedStoredToken = false
     @ObservationIgnored private var courseCache: [Int: (detail: CourseDetail, loadedAt: Date)] = [:]
     @ObservationIgnored private var courseLoads: [Int: Task<CourseDetail, Error>] = [:]
+    @ObservationIgnored private var authenticationAttemptID: UUID?
 
     public init(transport: any PipoSidecarTransport, tokenStore: any PipoTokenStore, cacheKeyStore: (any PipoTokenStore)? = nil, secureVault: KeychainSecureVault? = nil, refreshCoordinator: DashboardRefreshCoordinator, localStateStore: EncryptedLocalStateStore? = nil, settings: PipoSettings = PipoSettings(), notificationService: any PipoNotificationService = PipoSystemNotifications(), calendarService: any PipoCalendarService = PipoEventKitCalendar(), urlOpener: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }) {
         self.transport = transport
@@ -139,10 +140,21 @@ public final class PipoModel {
     }
 
     public func signIn(username: String, password: String) async {
+        guard authenticationAttemptID == nil else { return }
+        let attemptID = UUID()
+        authenticationAttemptID = attemptID
         phase = .authenticating
         authenticationError = nil
+        defer {
+            if authenticationAttemptID == attemptID {
+                authenticationAttemptID = nil
+                if phase == .authenticating { phase = snapshot == nil ? .signedOut : .ready }
+            }
+        }
         do {
             let response = try await transport.send(SidecarRequest(method: "authenticate_with_password", params: ["username": .string(username), "password": .string(password)]))
+            try Task.checkCancellation()
+            guard authenticationAttemptID == attemptID else { throw CancellationError() }
             let token = try token(from: response)
             try prepareSecureStorageForUserAction()
             try tokenStore.save(token: token)
@@ -152,15 +164,28 @@ public final class PipoModel {
             invalidateCourseCache()
             await refresh(using: token, force: true)
         } catch {
-            fail(error)
+            handleLifecycleError(error, authenticationContext: .schoolAccount)
         }
     }
 
     public func signIn(withToken token: String) async {
+        guard authenticationAttemptID == nil else { return }
+        let attemptID = UUID()
+        authenticationAttemptID = attemptID
         phase = .authenticating
         authenticationError = nil
+        defer {
+            if authenticationAttemptID == attemptID {
+                authenticationAttemptID = nil
+                if phase == .authenticating { phase = snapshot == nil ? .signedOut : .ready }
+            }
+        }
         do {
+            let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !token.isEmpty else { throw PipoCoreError.authenticationRequired }
             _ = try await transport.send(SidecarRequest(method: "authenticate_with_token", params: ["token": .string(token)]))
+            try Task.checkCancellation()
+            guard authenticationAttemptID == attemptID else { throw CancellationError() }
             try prepareSecureStorageForUserAction()
             try tokenStore.save(token: token)
             updateSecureStorageStatus()
@@ -169,7 +194,7 @@ public final class PipoModel {
             invalidateCourseCache()
             await refresh(using: token, force: true)
         } catch {
-            fail(error)
+            handleLifecycleError(error, authenticationContext: .accessToken)
         }
     }
 
@@ -220,6 +245,7 @@ public final class PipoModel {
     }
 
     public func signOut() async {
+        authenticationAttemptID = nil
         do {
             try tokenStore.deleteToken()
             try cacheKeyStore?.deleteToken()
@@ -356,7 +382,7 @@ public final class PipoModel {
             }
         } catch {
             consecutiveRefreshFailures += 1
-            if snapshot != nil { phase = .offline } else { fail(error) }
+            handleLifecycleError(error)
         }
     }
 
@@ -391,11 +417,50 @@ public final class PipoModel {
         phase = snapshot == nil ? .failed(message) : .offline
     }
 
+    private enum AuthenticationContext {
+        case schoolAccount
+        case accessToken
+    }
+
+    private func handleLifecycleError(_ error: Error, authenticationContext: AuthenticationContext? = nil) {
+        if error is CancellationError {
+            phase = snapshot == nil ? .signedOut : .ready
+            return
+        }
+        let classified = error as? PipoCoreError ?? .operationFailed(error.localizedDescription)
+        switch classified {
+        case .authenticationRequired:
+            try? tokenStore.deleteToken()
+            sessionToken = nil
+            hasLoadedStoredToken = true
+            invalidateCourseCache()
+            let message = switch authenticationContext {
+            case .schoolAccount: "The LMS rejected that username or password. Check your details and try again."
+            case .accessToken: "That access token is invalid or expired. Create a new token and try again."
+            case nil: classified.localizedDescription
+            }
+            authenticationError = message
+            phase = authenticationContext == nil ? .signedOut : .failed(message)
+        case .networkUnavailable, .timedOut, .rateLimited, .serviceUnavailable:
+            authenticationError = authenticationContext == nil ? nil : classified.localizedDescription
+            phase = snapshot == nil ? .failed(classified.localizedDescription) : .offline
+        case .malformedServiceResponse, .invalidResponse, .sidecarUnavailable:
+            authenticationError = authenticationContext == nil ? nil : classified.localizedDescription
+            phase = snapshot == nil ? .failed(classified.localizedDescription) : .offline
+        default:
+            fail(classified)
+        }
+    }
+
     private func storedToken() -> String? {
         if hasLoadedStoredToken { return sessionToken }
         hasLoadedStoredToken = true
         do {
-            sessionToken = try tokenStore.token()
+            sessionToken = try tokenStore.token()?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if sessionToken?.isEmpty == true {
+                try? tokenStore.deleteToken()
+                sessionToken = nil
+            }
             updateSecureStorageStatus()
             return sessionToken
         } catch {
