@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import AppKit
+import PipoAppCore
 import Testing
 @testable import PipoUI
 
@@ -297,7 +298,8 @@ func secureStorageRecoveryRemainsExplicit() async {
 @Test
 @MainActor
 func bundledWebMenuUsesOnlyLocalRuntimeAssets() throws {
-    let url = try #require(PipoWebMenuView.Coordinator.menuResourceURL)
+    let root = try #require(PipoWebMenuView.Coordinator.menuResourceRoot)
+    let url = root.appendingPathComponent("index.html")
     let html = try String(contentsOf: url, encoding: .utf8)
     let runtimeURL = url.deletingLastPathComponent().appendingPathComponent("menu.js")
     let runtime = try String(contentsOf: runtimeURL, encoding: .utf8)
