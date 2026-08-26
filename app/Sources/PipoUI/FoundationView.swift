@@ -997,11 +997,11 @@ private struct PipoOnboardingView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: authMethod) { _, _ in validationMessage = nil }
 
                 if acceptedLegalVersion != PipoLegal.currentVersion {
                     PipoLegalAcknowledgementView(openURL: onOpenURL)
                 }
-                .onChange(of: authMethod) { _, _ in validationMessage = nil }
 
                 if authMethod == .schoolAccount {
                     VStack(alignment: .leading, spacing: 12) {
