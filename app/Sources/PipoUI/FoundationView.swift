@@ -793,6 +793,16 @@ public struct PipoRootView: View {
                     configuration: configuration,
                     onSignOut: { isSignOutConfirmationPresented = true }
                 )
+                .confirmationDialog(
+                    "Sign out of Pipo?",
+                    isPresented: $isSignOutConfirmationPresented,
+                    titleVisibility: .visible
+                ) {
+                    Button("Sign out", role: .destructive, action: signOut)
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Pipo will remove your LMS token and saved dashboard from this Mac.")
+                }
             } else {
                 ZStack(alignment: .trailing) {
                     // Keep main shell mounted for whole menu session. Inspector
@@ -800,6 +810,18 @@ public struct PipoRootView: View {
                     // chrome, and content share one animation transform.
                     PipoMenuGlassBackdrop()
                     menuContent(for: visiblePhase)
+
+                    if isSignOutConfirmationPresented {
+                        PipoMenuSignOutConfirmation(
+                            onConfirm: {
+                                isSignOutConfirmationPresented = false
+                                signOut()
+                            },
+                            onCancel: { isSignOutConfirmationPresented = false }
+                        )
+                        .transition(.opacity)
+                        .zIndex(1)
+                    }
                 }
             }
         }
@@ -823,16 +845,6 @@ public struct PipoRootView: View {
                     PipoHostMaterial()
                 }
             }
-        }
-        .confirmationDialog(
-            "Sign out of Pipo?",
-            isPresented: $isSignOutConfirmationPresented,
-            titleVisibility: .visible
-        ) {
-            Button("Sign out", role: .destructive, action: signOut)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Pipo will remove your LMS token and saved dashboard from this Mac.")
         }
     }
 
@@ -940,6 +952,55 @@ public struct PipoRootView: View {
                 }
             )
         }
+    }
+}
+
+@MainActor
+private struct PipoMenuSignOutConfirmation: View {
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Button(action: onCancel) {
+                Color.black.opacity(0.52)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cancel sign out")
+
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Sign out of Pipo?")
+                        .font(.title3.weight(.semibold))
+                    Text("Pipo will remove your LMS token and saved dashboard from this Mac.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: 12) {
+                    Button(action: onCancel) {
+                        Text("Cancel")
+                            .frame(maxWidth: .infinity)
+                    }
+                        .buttonStyle(.bordered)
+
+                    Button(role: .destructive, action: onConfirm) {
+                        Text("Sign out")
+                            .frame(maxWidth: .infinity)
+                    }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                }
+            }
+            .padding(20)
+            .frame(width: 344, alignment: .leading)
+            .pipoGlassPane(cornerRadius: 18)
+            .accessibilityElement(children: .contain)
+        }
+        .frame(width: PipoMenuPanelGeometry.mainSize.width)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .onExitCommand(perform: onCancel)
     }
 }
 

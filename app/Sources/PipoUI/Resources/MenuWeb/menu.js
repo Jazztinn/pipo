@@ -136,6 +136,7 @@
   }
   function revealInspector(token) {
     const inspector = document.getElementById('inspector-panel');
+    const viewport = document.getElementById('inspector-viewport');
     if (!inspector || token !== inspectorOpenToken || Number(inspector.dataset.openToken || 0) !== token || inspector.dataset.closing === 'true') return;
     // Native receives visibility for host interaction policy only. WebKit owns
     // inspector shell and content, so start their shared transition immediately.
@@ -149,7 +150,9 @@
       if (token !== inspectorOpenToken || Number(inspector.dataset.openToken || 0) !== token || inspector.dataset.closing === 'true') return;
       inspector.classList.remove('hidden', 'inspector-enter', 'inspector-exit');
       inspector.classList.add('flex');
+      viewport?.classList.add('is-active');
       void inspector.offsetWidth;
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) viewport?.classList.add('is-transitioning');
       inspector.classList.add('inspector-enter');
       inspector.setAttribute('aria-hidden', 'false');
       delete inspector.dataset.opening;
@@ -259,12 +262,14 @@
   }
   function closeInspectorSafe() {
     const inspector = document.getElementById('inspector-panel');
+    const viewport = document.getElementById('inspector-viewport');
     if (!inspector || inspector.classList.contains('hidden')) return false;
     if (inspector.dataset.closing === 'true') return true;
     inspectorOpenToken += 1;
     delete inspector.dataset.opening;
     delete inspector.dataset.openToken;
     inspector.dataset.closing = 'true';
+    viewport?.classList.add('is-transitioning');
     inspector.classList.remove('inspector-enter');
     inspector.classList.add('inspector-exit');
     inspector.setAttribute('aria-hidden', 'true');
@@ -277,6 +282,7 @@
       inspector.removeEventListener('animationend', onInspectorExitEnd);
       inspector.classList.add('hidden');
       inspector.classList.remove('flex', 'inspector-exit');
+      viewport?.classList.remove('is-active', 'is-transitioning');
       delete inspector.dataset.closing;
       const main = document.getElementById('main-panel');
       main?.removeAttribute('inert'); main?.removeAttribute('aria-hidden');
@@ -383,10 +389,27 @@
     const buttons = [all, ...safeArray(state.courses).map(course => { const button = el('button', 'course-filter-btn w-full text-left px-2 py-1.5 rounded-lg hover:bg-white/10 text-neutral-300 text-[11px] truncate', field(valueFor(course, 'shortName', 'short_name', 'name'), 'Course')); button.dataset.courseFilter = meaningful(course?.id) ? String(course.id).toLowerCase() : ''; return button; })];
     current.replaceChildren(...buttons); buttons.forEach(button => button.addEventListener('click', () => { tabState[activeTab].courseFilter = button.dataset.courseFilter; applyFilters(); dismissFilter(); }));
   }
+  function syncRefreshControl(value) {
+    const refresh = document.getElementById('refresh-slider');
+    if (!refresh) return;
+    const minimum = Number(refresh.min) || 5;
+    const maximum = Number(refresh.max) || 60;
+    const step = Number(refresh.step) || 5;
+    const raw = Number(value);
+    const candidate = Number.isFinite(raw) ? raw : Number(refresh.defaultValue) || minimum;
+    const stepped = Math.round((candidate - minimum) / step) * step + minimum;
+    const minutes = Math.min(maximum, Math.max(minimum, stepped));
+    refresh.value = String(minutes);
+    const label = document.getElementById('refresh-label');
+    if (label) label.textContent = `Refresh every ${minutes} minutes`;
+    const output = document.getElementById('refresh-value');
+    if (output) output.textContent = `${minutes}m`;
+    refresh.setAttribute('aria-valuetext', `${minutes} minutes`);
+  }
   function syncSettings(state) {
     const names = ['notificationsEnabled', 'reminderDayBefore', 'reminderHourBefore', 'assignmentNotifications', 'announcementNotifications', 'messageNotifications', 'gradeNotifications'];
     document.querySelectorAll('input.apple-switch').forEach((input, index) => { const name = names[index]; input.dataset.setting = name; if (state.settings && name in state.settings) input.checked = Boolean(state.settings[name]); });
-    const refresh = document.querySelector('#view-settings input[type="range"]'); if (refresh && state.settings?.refreshMinutes) refresh.value = String(state.settings.refreshMinutes);
+    if (state.settings && 'refreshMinutes' in state.settings) syncRefreshControl(state.settings.refreshMinutes);
     const channel = document.querySelector('#view-settings select'); if (channel && state.updateChannel) channel.value = state.updateChannel;
   }
   function applyState(state) { if (!state || typeof state !== 'object' || (Number.isFinite(state.revision) && state.revision <= revision)) return; currentState = state; revision = Number.isFinite(state.revision) ? state.revision : revision + 1; renderState(state); switchTab(state.selectedTab || 'today', false); window.dispatchEvent(new CustomEvent('pipo:stateApplied', { detail: state })); }
@@ -433,9 +456,17 @@
     document.querySelectorAll('.cat-filter-btn').forEach(button => button.addEventListener('click', () => { const label = button.textContent.trim().toLowerCase(); tabState[activeTab].categoryFilter = label.startsWith('all') ? 'all' : label.replace(/s$/, ''); applyFilters(); dismissFilter(); }));
     const settingNames = ['notificationsEnabled', 'reminderDayBefore', 'reminderHourBefore', 'assignmentNotifications', 'announcementNotifications', 'messageNotifications', 'gradeNotifications'];
     document.querySelectorAll('input.apple-switch').forEach((input, index) => { input.dataset.setting = input.dataset.setting || settingNames[index] || 'notificationsEnabled'; input.addEventListener('change', () => request('updateSettings', { [input.dataset.setting]: input.checked }, 'main', input)); });
-    document.querySelector('#view-settings input[type="range"]')?.addEventListener('change', event => request('updateSettings', { refreshMinutes: Number(event.target.value) }, 'main', event.target));
+    const refresh = document.getElementById('refresh-slider');
+    refresh?.addEventListener('input', event => syncRefreshControl(event.target.value));
+    refresh?.addEventListener('change', event => request('updateSettings', { refreshMinutes: Number(event.target.value) }, 'main', event.target));
+    syncRefreshControl(refresh?.value);
     document.querySelectorAll('select').forEach(select => select.addEventListener('change', () => request('updateChannel', { channel: select.value }, 'main', select)));
     document.getElementById('inspector-back')?.addEventListener('click', closeInspectorSafe); document.getElementById('inspector-close')?.addEventListener('click', closeInspectorSafe);
+    document.getElementById('inspector-panel')?.addEventListener('animationend', event => {
+      if (event.target !== event.currentTarget || event.animationName !== 'inspector-panel-in' || event.currentTarget.dataset.closing === 'true') return;
+      event.currentTarget.classList.remove('inspector-enter');
+      document.getElementById('inspector-viewport')?.classList.remove('is-transitioning');
+    });
     document.addEventListener('pointerdown', event => playClickFor(event.target), true);
     document.addEventListener('keydown', event => { if ((event.key === 'Enter' || event.key === ' ') && !event.repeat) playClickFor(event.target); }, true);
     document.addEventListener('click', event => { const menu = document.getElementById('item-context-menu'); if (!event.target.closest('#item-context-menu')) dismissMenu(); if (!event.target.closest('#filter-popover') && !event.target.closest('#filter-toggle')) dismissFilter(); const actionButton = event.target.closest('[data-action]'); if (!actionButton) return; const rawAction = actionButton.dataset.action; if (rawAction.startsWith('selectTab:')) return; if (rawAction === 'closeInspector') return closeInspectorSafe(); if (rawAction === 'clearCache' && !window.confirm('Clear the saved dashboard? Pipo will fetch it again on refresh.')) return; const itemID = selectedType === 'course' ? null : selectedItem?.id; const courseID = actionButton.dataset.courseId || (selectedType === 'course' ? (selectedItem?.id || selectedItem?.courseID) : null); const payload = actionButton.dataset.lmsRoot === 'true' ? { lmsRoot: true } : rawAction === 'refreshSection' ? { section: actionButton.dataset.section } : rawAction === 'loadCourse' ? { courseID, openToken: inspectorOpenToken } : courseID ? { courseID } : itemID ? { itemID } : {}; const source = actionButton.closest('#inspector-panel') ? 'inspector' : 'main'; request(rawAction, payload, source, actionButton); dismissMenu(); event.preventDefault(); event.stopImmediatePropagation(); }, true);

@@ -250,9 +250,10 @@
     #sync-dot[data-phase="failed"] { background: #fb7185; }
     #sync-dot[data-phase="loading"], #sync-dot[data-phase="authenticating"] { background: #60a5fa; }
 
-    body > .relative > #inspector-panel {
+    body > .relative > #inspector-viewport {
       position: absolute;
       z-index: 80;
+      pointer-events: none;
       inset: 0;
       width: 340px;
       height: min(660px, 100%);
@@ -263,9 +264,27 @@
       margin: auto;
     }
 
-    html[data-host-mode="menuBar"] body > .relative > #inspector-panel {
+    html[data-host-mode="menuBar"] body > .relative > #inspector-viewport {
       z-index: 10;
       width: var(--pipo-inspector-width, 340px);
+    }
+
+    #inspector-viewport.is-transitioning {
+      overflow: hidden;
+    }
+
+    #inspector-viewport.is-active {
+      pointer-events: auto;
+    }
+
+    #inspector-panel {
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      max-height: none;
+    }
+
+    html[data-host-mode="menuBar"] #inspector-panel {
       border-radius: var(--pipo-corner-radius, 16px);
     }
 
@@ -284,7 +303,7 @@
         flex: 0 0 380px;
       }
 
-      body > .relative > #inspector-panel {
+      body > .relative > #inspector-viewport {
         position: relative;
         inset: auto;
         width: 340px;
@@ -300,7 +319,7 @@
     html.embedded, html.embedded body { width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0; overflow: hidden; background: transparent; }
     html.embedded body > .relative { position: fixed; top: 8px; right: 8px; width: 736px; height: auto; margin: 0; display: flex; align-items: flex-start; justify-content: flex-end; gap: 16px; transform: scale(1.27); transform-origin: top right; }
     html.embedded body > .relative > .mac-window.w-\[380px\] { width: 380px; height: 580px; max-width: 380px; flex: 0 0 380px; }
-    html.embedded body > .relative > #inspector-panel { width: 340px; height: 580px; max-width: 340px; max-height: 580px; flex: 0 0 340px; }
+    html.embedded body > .relative > #inspector-viewport { width: 340px; height: 580px; max-width: 340px; max-height: 580px; flex: 0 0 340px; }
 
     .inspector-enter {
       animation: inspector-panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -343,14 +362,13 @@
     .item-secondary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     @keyframes inspector-panel-in {
-      /* Travel from left edge so inspector never crosses main pane. */
-      from { transform: translateX(calc(var(--inspector-enter-offset, 24px) * -1)); }
+      from { transform: translateX(var(--inspector-enter-offset, 24px)); }
       to { transform: translateX(0); }
     }
 
     @keyframes inspector-panel-out {
       from { transform: translateX(0); }
-      to { transform: translateX(calc(var(--inspector-enter-offset, 24px) * -1)); }
+      to { transform: translateX(var(--inspector-enter-offset, 24px)); }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -377,7 +395,8 @@
 
   <div id="pipo-shell" class="relative flex gap-4 items-start max-w-5xl w-full justify-center">
 
-    <!-- LEFT SIDE INSPECTOR PANEL (Opens always to the LEFT) -->
+    <!-- Fixed left viewport clips right-origin inspector travel behind main pane. -->
+    <div id="inspector-viewport">
     <div id="inspector-panel" role="region" aria-labelledby="inspector-title" aria-hidden="true" class="mac-window w-[340px] rounded-2xl p-4 hidden flex-col text-xs relative z-10 max-h-[580px]">
         <!-- Inspector Navigation Header -->
         <div id="inspector-nav" class="flex items-center justify-between border-b border-white/10 pb-2.5">
@@ -501,6 +520,7 @@
         <span>Session-only controls</span>
         <button class="text-rose-400 hover:underline font-medium">Snooze reminder</button>
       </div>
+    </div>
     </div>
 
     <!-- MAIN PIPO POPUP WINDOW -->
@@ -705,10 +725,10 @@
             </div>
             <div class="space-y-1.5 border-t border-white/5 pt-2.5">
               <div class="flex items-center justify-between text-xs">
-                <span class="text-neutral-300">Refresh every 15 minutes</span>
-                <span class="text-[10px] text-neutral-400 font-mono">15m</span>
+                <span id="refresh-label" class="text-neutral-300">Refresh every 15 minutes</span>
+                <output id="refresh-value" class="text-[10px] text-neutral-400 font-mono" for="refresh-slider">15m</output>
               </div>
-              <input type="range" min="5" max="60" value="15" class="w-full accent-rose-500 bg-white/10 h-1 rounded-lg appearance-none cursor-pointer">
+              <input id="refresh-slider" type="range" min="5" max="60" step="5" value="15" aria-labelledby="refresh-label" aria-describedby="refresh-value" class="w-full accent-rose-500 bg-white/10 h-1 rounded-lg appearance-none cursor-pointer">
             </div>
             <div class="pt-1">
               <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">

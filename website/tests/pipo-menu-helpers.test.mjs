@@ -85,3 +85,14 @@ test("runtime exposes complete async states and stale-response guards", async ()
   assert.match(runtime, /event\.preventDefault\(\)/);
   assert.doesNotMatch(runtime, /Course not supplied|No date supplied/);
 });
+
+test("refresh slider uses one explicit stepped control and syncs visible value", async () => {
+  const runtime = await readFile(resolve(import.meta.dirname, "../../app/Sources/PipoUI/Resources/MenuWeb/menu.js"), "utf8");
+  const html = await readFile(resolve(import.meta.dirname, "../../app/Sources/PipoUI/Resources/MenuWeb/index.html"), "utf8");
+  assert.match(html, /id="refresh-slider"[^>]+min="5" max="60" step="5" value="15"/);
+  assert.match(html, /id="refresh-label"/);
+  assert.match(html, /id="refresh-value"[^>]+for="refresh-slider"/);
+  assert.match(runtime, /function syncRefreshControl\(value\)/);
+  assert.match(runtime, /syncRefreshControl\(state\.settings\.refreshMinutes\)/);
+  assert.match(runtime, /aria-valuetext/);
+});
