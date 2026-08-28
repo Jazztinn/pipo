@@ -6,6 +6,13 @@ import Testing
 @testable import PipoUI
 
 @Test
+func initialDashboardSyncUsesNonblockingPresentation() {
+    #expect(PipoUIPhase.presenting(.authenticating) == .loading)
+    #expect(PipoUIPhase.presenting(.loading) == .reconnecting)
+    #expect(PipoUIPhase.presenting(.ready) == .ready)
+}
+
+@Test
 @MainActor
 func bundledHollowPipoLogoLoads() {
     let image = PipoBrandAssets.hollowLogo

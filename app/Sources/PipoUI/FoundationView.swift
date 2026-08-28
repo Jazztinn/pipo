@@ -52,6 +52,17 @@ public enum PipoUIPhase: Equatable {
     case reconnecting
     case partialFailure
     case failed(String)
+
+    static func presenting(_ phase: PipoPhase) -> PipoUIPhase {
+        switch phase {
+        case .signedOut: .onboarding
+        case .authenticating: .loading
+        case .loading: .reconnecting
+        case .ready: .ready
+        case .offline: .offline
+        case .failed(let message): .failed(message)
+        }
+    }
 }
 
 public enum PipoUISecureStorageStatus: Equatable, Sendable {
@@ -562,13 +573,7 @@ public struct PipoUIConfiguration {
     }
 
     private static func phase(for phase: PipoPhase) -> PipoUIPhase {
-        switch phase {
-        case .signedOut: .onboarding
-        case .authenticating, .loading: .loading
-        case .ready: .ready
-        case .offline: .offline
-        case .failed(let message): .failed(message)
-        }
+        PipoUIPhase.presenting(phase)
     }
 
     fileprivate static func snapshot(from snapshot: DashboardSnapshot) -> PipoDashboardSnapshot {
@@ -657,7 +662,7 @@ public struct PipoCompanionView: View {
             switch model.phase {
             case .signedOut:
                 onboarding()
-            case .authenticating, .loading:
+            case .authenticating:
                 VStack(spacing: 18) {
                     Image(nsImage: NSApplication.shared.applicationIconImage)
                         .resizable()
@@ -913,13 +918,7 @@ public struct PipoRootView: View {
     }
 
     private func phase(for phase: PipoPhase) -> PipoUIPhase {
-        switch phase {
-        case .signedOut: .onboarding
-        case .authenticating, .loading: .loading
-        case .ready: .ready
-        case .offline: .offline
-        case .failed(let message): .failed(message)
-        }
+        PipoUIPhase.presenting(phase)
     }
 
     private var menuBarWidth: CGFloat {
