@@ -51,6 +51,15 @@ test("missing LMS values and section phases have safe presentations", async () =
   assert.deepEqual({ ...helper.sectionPresentation("failed", "Messages", 1) }, { kind: "content", text: "", retry: false });
 });
 
+test("grades preserve LMS formatting and fall back to raw points", async () => {
+  const helper = await loadHelpers();
+  assert.equal(helper.gradeDisplay({ published_grade: "18 / 20" }), "18 / 20");
+  assert.equal(helper.gradeDisplay({ gradeformatted: "—", percentageformatted: "92%" }), "92%");
+  assert.equal(helper.gradeDisplay({ gradeformatted: "1.50" }), "1.50");
+  assert.equal(helper.gradeDisplay({ graderaw: 18, grademax: 20 }), "18 / 20");
+  assert.equal(helper.gradeDisplay({ gradeformatted: "-" }), null);
+});
+
 test("runtime chooses one document greeting outside render loop", async () => {
   const runtime = await readFile(resolve(import.meta.dirname, "../../app/Sources/PipoUI/Resources/MenuWeb/menu.js"), "utf8");
   const html = await readFile(resolve(import.meta.dirname, "../../app/Sources/PipoUI/Resources/MenuWeb/index.html"), "utf8");

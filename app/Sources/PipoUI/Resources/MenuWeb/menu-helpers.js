@@ -52,6 +52,17 @@
     return text;
   }
 
+  function gradeDisplay(grade) {
+    const meaningful = item => item != null && item !== false && !['', '-', '—', 'null', 'undefined', 'not supplied'].includes(String(item).trim().toLowerCase());
+    const value = (...keys) => keys.map(key => grade?.[key]).find(meaningful);
+    const formatted = value('publishedGrade', 'published_grade', 'gradeformatted', 'gradeFormatted', 'grade_formatted', 'percentageformatted', 'percentageFormatted', 'percentage_formatted');
+    if (formatted != null) return String(formatted).trim();
+    const raw = value('graderaw', 'gradeRaw', 'grade_raw', 'grade', 'rawGrade', 'raw_grade', 'score', 'points', 'value');
+    const maximum = value('grademax', 'gradeMax', 'grade_max', 'maxGrade', 'max_grade', 'max');
+    if (raw != null && maximum != null) return `${String(raw).trim()} / ${String(maximum).trim()}`;
+    return raw != null ? String(raw).trim() : null;
+  }
+
   function sectionPresentation(status, title, count = 0) {
     if (count > 0) return Object.freeze({ kind: 'content', text: '', retry: false });
     const normalized = String(status || 'ready').toLowerCase();
@@ -60,5 +71,5 @@
     return Object.freeze({ kind: 'empty', text: `No ${title.toLowerCase()}`, retry: false });
   }
 
-  global.pipoMenuHelpers = Object.freeze({ chooseGreeting, greetingPeriod, greetingsForHour, instructorFor, instructorFromCourseTitle, safeDisplay, sectionPresentation });
+  global.pipoMenuHelpers = Object.freeze({ chooseGreeting, greetingPeriod, greetingsForHour, instructorFor, instructorFromCourseTitle, safeDisplay, gradeDisplay, sectionPresentation });
 })(window);

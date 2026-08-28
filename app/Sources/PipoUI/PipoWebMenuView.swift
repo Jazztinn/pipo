@@ -169,7 +169,11 @@ struct PipoWebMenuView: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        configuration.userContentController.addUserScript(WKUserScript(source: Self.bootstrap, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: Self.bootstrap(hostMode: hostMode),
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         configuration.userContentController.add(context.coordinator, name: "pipo")
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
@@ -194,7 +198,17 @@ struct PipoWebMenuView: NSViewRepresentable {
         view.navigationDelegate = nil
     }
 
-    private static let bootstrap = """
+    static func bootstrap(hostMode: PipoWebMenuHostMode) -> String {
+        """
+    const root = document.documentElement;
+    if (root) {
+      root.dataset.hostMode = "\(hostMode.rawValue)";
+      root.style.setProperty('--pipo-main-width', '\(Int(PipoMenuPanelGeometry.mainSize.width))px');
+      root.style.setProperty('--pipo-main-height', '\(Int(PipoMenuPanelGeometry.mainSize.height))px');
+      root.style.setProperty('--pipo-inspector-width', '\(Int(PipoMenuPanelGeometry.inspectorWidth))px');
+      root.style.setProperty('--pipo-inspector-gap', '\(Int(PipoMenuPanelGeometry.inspectorGap))px');
+      root.style.setProperty('--pipo-corner-radius', '\(Int(PipoMenuPanelGeometry.cornerRadius))px');
+    }
     window.pipo = Object.freeze({
       version: 1, available: true,
       request(action, payload = {}) {
@@ -204,6 +218,7 @@ struct PipoWebMenuView: NSViewRepresentable {
       }
     });
     """
+    }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         weak var webView: WKWebView?

@@ -18,6 +18,7 @@ func bundledHollowPipoLogoLoads() {
     let image = PipoBrandAssets.hollowLogo
     #expect(image.size.width > 0)
     #expect(image.size.height > 0)
+    #expect(PipoBrandAssets.adaptiveHollowLogo.isTemplate)
     #expect(PipoBrandAssets.hollowTemplateLogo.isTemplate)
 }
 
@@ -96,12 +97,22 @@ func menuPanelGeometryKeepsMainPaneStableAcrossInspectorRoundTrip() {
 @MainActor
 func menuHostWidthIsFixedForOpenSession() {
     let layout = PipoMenuHostLayout()
-    #expect(layout.width == 420)
+    #expect(layout.width == 380)
     layout.usesWideHost = true
     let openSessionWidth = layout.width
     #expect(openSessionWidth == 760)
     // Inspector visibility is intentionally absent from host layout state.
     #expect(layout.width == openSessionWidth)
+}
+
+@Test
+func webMenuBootstrapInstallsHostGeometryBeforePageScripts() {
+    let bootstrap = PipoWebMenuView.bootstrap(hostMode: .menuBar)
+    #expect(bootstrap.contains("root.dataset.hostMode = \"menuBar\""))
+    #expect(bootstrap.contains("--pipo-main-width', '380px"))
+    #expect(bootstrap.contains("--pipo-main-height', '660px"))
+    #expect(bootstrap.contains("--pipo-inspector-width', '340px"))
+    #expect(bootstrap.contains("--pipo-inspector-gap', '16px"))
 }
 
 @Test

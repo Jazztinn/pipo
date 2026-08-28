@@ -38,8 +38,18 @@
       box-shadow: none;
     }
 
+    /* Native menu host owns persistent glass shell. Child panes stay geometry-only. */
+    html[data-host-mode="menuBar"] #main-panel.mac-window,
+    html[data-host-mode="menuBar"] #inspector-panel.mac-window {
+      background: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      border-color: transparent;
+      box-shadow: none;
+    }
+
     html[data-host-mode="menuBar"] {
-      --inspector-enter-offset: 380px;
+      --inspector-enter-offset: var(--pipo-main-width, 380px);
     }
 
     .mac-card {
@@ -144,7 +154,16 @@
 
     html[data-host-mode="menuBar"] body > .relative {
       justify-content: flex-end;
-      padding-right: 12px;
+      gap: var(--pipo-inspector-gap, 16px);
+      padding-right: 0;
+    }
+
+    html[data-host-mode="menuBar"] body > .relative > #main-panel {
+      width: min(var(--pipo-main-width, 380px), 100%);
+      height: min(var(--pipo-main-height, 660px), 100%);
+      max-width: 100%;
+      flex-basis: var(--pipo-main-width, 380px);
+      border-radius: var(--pipo-corner-radius, 16px);
     }
 
     body > .relative > .mac-window.w-\[380px\] {
@@ -184,6 +203,8 @@
 
     html[data-host-mode="menuBar"] body > .relative > #inspector-panel {
       z-index: 10;
+      width: var(--pipo-inspector-width, 340px);
+      border-radius: var(--pipo-corner-radius, 16px);
     }
 
     @media (min-width: 736px) {
@@ -259,15 +280,6 @@
     .item-title { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
     .item-secondary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-    .view-panel.panel-enter {
-      animation: main-panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-    }
-
-    .view-panel.panel-exit {
-      animation: main-panel-out 180ms cubic-bezier(.4, 0, 1, 1) both;
-      pointer-events: none;
-    }
-
     @keyframes inspector-panel-in {
       from { transform: translateX(var(--inspector-enter-offset, 24px)); }
       to { transform: translateX(0); }
@@ -278,21 +290,9 @@
       to { transform: translateX(var(--inspector-enter-offset, 24px)); }
     }
 
-    @keyframes main-panel-in {
-      from { opacity: 0; filter: blur(7px); transform: translateX(24px); }
-      to { opacity: 1; filter: blur(0); transform: translateX(0); }
-    }
-
-    @keyframes main-panel-out {
-      from { opacity: 1; filter: blur(0); transform: translateX(0); }
-      to { opacity: 0; filter: blur(7px); transform: translateX(24px); }
-    }
-
     @media (prefers-reduced-motion: reduce) {
       .inspector-enter,
-      .inspector-exit,
-      .view-panel.panel-enter,
-      .view-panel.panel-exit { animation: none; }
+      .inspector-exit { animation: none; }
     }
 
     @media (prefers-reduced-transparency: reduce) {
@@ -444,10 +444,9 @@
     <div id="main-panel" class="mac-window w-[380px] rounded-2xl flex flex-col overflow-hidden text-[13px] relative z-20 shrink-0">
 
       <!-- Top Title Bar -->
-      <div class="h-10 px-4 flex items-center justify-between border-b border-white/10 relative bg-white/[0.02]">
-        <div class="w-12"></div> <!-- Spacer for optical balance -->
-        <span id="header-title" class="text-[13px] font-semibold text-neutral-200 tracking-tight">Today</span>
-        <button id="sync-button" type="button" data-action="refresh" aria-label="Refresh Pipo. Current status: Ready" class="flex items-center gap-1.5 text-[10px] text-neutral-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 hover:bg-white/10 transition">
+      <div id="pipo-header" class="h-10 px-4 flex items-center justify-center border-b border-white/10 relative bg-white/[0.02]">
+        <span id="header-title" class="absolute inset-0 flex items-center justify-center pointer-events-none text-[13px] font-semibold text-neutral-200 tracking-tight">Today</span>
+        <button id="sync-button" type="button" data-action="refresh" aria-label="Refresh Pipo. Current status: Ready" class="absolute right-4 top-1/2 -translate-y-1/2 max-w-[108px] flex items-center gap-1.5 text-[10px] text-neutral-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 hover:bg-white/10 transition truncate">
             <span id="sync-dot" data-phase="ready" class="w-1.5 h-1.5 rounded-full bg-neutral-400"></span>
           <span id="sync-status">Ready</span>
         </button>

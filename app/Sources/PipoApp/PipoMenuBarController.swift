@@ -22,6 +22,7 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
     private var workspaceObservers: [NSObjectProtocol] = []
     private var motionTask: Task<Void, Never>?
     private var wideHostForSession = false
+    private var sessionTargetFrame: CGRect?
     private var visibility: Visibility = .hidden
 
     private enum Visibility { case hidden, showing, shown, hiding }
@@ -94,10 +95,14 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         }
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self, self.panel.isVisible else { return event }
+            let mainPane = PipoMenuPanelGeometry.mainPaneFrame(
+                in: CGRect(origin: .zero, size: self.panel.frame.size),
+                inspectorVisible: self.inspectorVisible
+            )
             if event.window === self.panel,
                self.wideHostForSession,
                !self.inspectorVisible,
-               event.locationInWindow.x < 368
+               event.locationInWindow.x < mainPane.minX
             {
                 self.hidePanel()
                 return nil
@@ -140,15 +145,18 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         wideHostForSession = PipoMenuPanelGeometry.usesExpandedInspector(anchoredTo: anchor, in: visibleFrame)
         menuHostLayout.usesWideHost = wideHostForSession
         let target = PipoMenuPanelGeometry.frame(anchoredTo: anchor, in: visibleFrame, inspectorVisible: wideHostForSession)
+        sessionTargetFrame = target
         if !panel.isVisible {
+            panel.setFrame(target, display: false)
+            panel.contentView?.frame = CGRect(origin: .zero, size: target.size)
             panel.contentView?.layoutSubtreeIfNeeded()
             panel.setFrame(PipoMenuPanelGeometry.offscreenRightFrame(from: target, in: visibleFrame), display: true)
-            panel.alphaValue = 0
+            panel.alphaValue = 1
             panel.orderFrontRegardless()
             panel.makeKey()
         }
         visibility = .showing
-        animatePanel(to: target, alpha: 1, duration: PipoMenuPanelGeometry.showDuration, curve: .show) { [weak self] in
+        animatePanel(to: target, duration: PipoMenuPanelGeometry.showDuration, curve: .show) { [weak self] in
             guard let self, self.visibility == .showing else { return }
             self.visibility = .shown
         }
@@ -158,16 +166,19 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         guard panel.isVisible, visibility != .hidden else { return }
         guard let visibleFrame = currentVisibleFrame else {
             panel.orderOut(nil)
+            sessionTargetFrame = nil
             visibility = .hidden
             return
         }
         inspectorVisible = false
         visibility = .hiding
-        let hidden = PipoMenuPanelGeometry.offscreenRightFrame(from: panel.frame, in: visibleFrame)
-        animatePanel(to: hidden, alpha: 0, duration: PipoMenuPanelGeometry.hideDuration, curve: .hide) { [weak self] in
+        let visibleTarget = sessionTargetFrame ?? panel.frame
+        let hidden = PipoMenuPanelGeometry.offscreenRightFrame(from: visibleTarget, in: visibleFrame)
+        animatePanel(to: hidden, duration: PipoMenuPanelGeometry.hideDuration, curve: .hide) { [weak self] in
             guard let self, self.visibility == .hiding else { return }
             self.panel.orderOut(nil)
             self.panel.alphaValue = 1
+            self.sessionTargetFrame = nil
             self.visibility = .hidden
         }
     }
@@ -178,6 +189,7 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         guard visibility != .hiding else {
             panel.orderOut(nil)
             panel.alphaValue = 1
+            sessionTargetFrame = nil
             visibility = .hidden
             return
         }
@@ -187,7 +199,7 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
            !PipoMenuPanelGeometry.usesExpandedInspector(anchoredTo: anchor, in: visibleFrame)
         {
             // Never squeeze a live 760pt WKWebView. Close; next open selects
-            // the 420pt overlay host for this display.
+            // the 380pt overlay host for this display.
             hidePanel()
             return
         }
@@ -223,7 +235,6 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         button.imagePosition = count > 0 ? .imageLeading : .imageOnly
         button.title = count > 0 ? " \(count)" : ""
         button.setAccessibilityLabel(count > 0 ? "Pipo, \(count) urgent items" : "Pipo")
-        repositionVisiblePanel()
     }
 
     private func applyFrame(useWideHost: Bool, animated: Bool) {
@@ -233,6 +244,7 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
             in: visibleFrame,
             inspectorVisible: useWideHost
         )
+        sessionTargetFrame = target
         guard animated else {
             motionTask?.cancel()
             panel.setFrame(target, display: true)
@@ -240,7 +252,6 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
         }
         animatePanel(
             to: target,
-            alpha: panel.alphaValue,
             duration: useWideHost ? PipoMenuPanelGeometry.showDuration : PipoMenuPanelGeometry.hideDuration,
             curve: useWideHost ? .show : .hide
         )
@@ -259,17 +270,15 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
 
     private func animatePanel(
         to targetFrame: CGRect,
-        alpha targetAlpha: CGFloat,
         duration: TimeInterval,
         curve: MotionCurve,
         completion: (@MainActor () -> Void)? = nil
     ) {
         motionTask?.cancel()
         let startFrame = panel.frame
-        let startAlpha = panel.alphaValue
+        panel.alphaValue = 1
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || duration == 0 {
             panel.setFrame(targetFrame, display: true)
-            panel.alphaValue = targetAlpha
             completion?()
             return
         }
@@ -280,13 +289,11 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
                 let raw = min(1, Date().timeIntervalSince(started) / duration)
                 let progress = Self.cubicBezierProgress(raw, controlPoints: curve.controlPoints)
                 self.panel.setFrame(Self.interpolate(from: startFrame, to: targetFrame, progress: progress), display: true)
-                self.panel.alphaValue = startAlpha + (targetAlpha - startAlpha) * progress
                 if raw >= 1 { break }
                 try? await Task.sleep(for: .milliseconds(8))
             }
             guard !Task.isCancelled else { return }
             self.panel.setFrame(targetFrame, display: true)
-            self.panel.alphaValue = targetAlpha
             completion?()
         }
     }

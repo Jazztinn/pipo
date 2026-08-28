@@ -134,10 +134,11 @@ struct PipoSettingsCenterView: View {
     private var connectionSection: some View {
         Section("Connection") {
             HStack(alignment: .top, spacing: 14) {
-                Image(nsImage: PipoBrandAssets.hollowLogo)
+                Image(nsImage: PipoBrandAssets.adaptiveHollowLogo)
                     .resizable()
                     .scaledToFit()
                     .frame(width: 48, height: 48)
+                    .foregroundStyle(.primary)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(connectionTitle).font(.headline)
@@ -303,10 +304,11 @@ struct PipoSettingsCenterView: View {
         settingsForm("About Pipo") {
             Section {
                 HStack(spacing: 16) {
-                    Image(nsImage: PipoBrandAssets.hollowLogo)
+                    Image(nsImage: PipoBrandAssets.adaptiveHollowLogo)
                         .resizable()
                         .scaledToFit()
                         .frame(width: 56, height: 56)
+                        .foregroundStyle(.primary)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Pipo").font(.title2.bold())

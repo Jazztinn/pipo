@@ -18,6 +18,8 @@
   let inspectorTrigger = null;
   let inspectorCloseTimer = null;
   let inspectorOpenToken = 0;
+  let clickAudioPool = [];
+  const lastSoundAt = new WeakMap();
   const tabState = {
     today: { query: '', courseFilter: 'all', categoryFilter: 'all' },
     courses: { query: '', courseFilter: 'all', categoryFilter: 'all' },
@@ -30,6 +32,7 @@
   const field = (value, fallback = '—') => meaningful(value) ? value : fallback;
   const valueFor = (object, ...keys) => keys.map(key => object?.[key]).find(value => value != null && value !== '');
   const safeArray = value => Array.isArray(value) ? value : [];
+  const gradeDisplay = grade => window.pipoMenuHelpers?.gradeDisplay(grade) ?? null;
   const courseIDFor = item => valueFor(item, 'courseID', 'course_id');
   const courseNameFor = item => valueFor(item, 'courseName', 'course_name');
   const itemTitle = item => field(valueFor(item, 'title', 'name', 'shortName', 'short_name', 'label'), 'LMS item');
@@ -62,10 +65,6 @@
   }
   function request(action, payload = {}, source = 'main', trigger = null) {
     if (!allowed.has(action)) return null;
-    if (action !== 'ui.ready' && action !== 'setInspectorVisible' && action !== 'dismissMenu') {
-      const audio = document.getElementById('pipo-click');
-      if (audio) { audio.currentTime = 0; audio.play().catch(() => {}); }
-    }
     const generatedID = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const outbound = { ...payload, requestID: generatedID, revision };
     setActionPending(trigger, true);
@@ -218,12 +217,17 @@
     if (!block || !list || !empty) return;
     if (grades == null) { block.classList.add('hidden'); return; }
     block.classList.remove('hidden');
-    const rows = (Array.isArray(grades) ? grades : []).map(grade => {
+    const seen = new Set();
+    const rows = (Array.isArray(grades) ? grades : []).filter(grade => {
+      const key = String(grade?.entityKey || grade?.id || `${itemTitle(grade)}:${dateText(grade) || ''}:${gradeDisplay(grade) || ''}`);
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    }).map(grade => {
       const row = el('article', 'mac-card rounded-xl p-2.5 space-y-1.5');
       const heading = el('div', 'flex items-start justify-between gap-3');
       const title = el('span', 'text-neutral-200 font-medium min-w-0 leading-snug', itemTitle(grade));
-      const publishedGrade = valueFor(grade, 'publishedGrade', 'published_grade');
-      const badge = el('span', 'rounded-md bg-rose-500/15 border border-rose-500/25 px-2 py-0.5 text-rose-300 font-mono text-[11px] shrink-0', field(publishedGrade, 'Published'));
+      const publishedGrade = gradeDisplay(grade);
+      const badge = el('span', `rounded-md px-2 py-0.5 font-mono text-[11px] shrink-0 ${publishedGrade ? 'bg-rose-500/15 border border-rose-500/25 text-rose-300' : 'bg-white/5 border border-white/10 text-neutral-400'}`, publishedGrade || 'Grade unavailable');
       heading.append(title, badge);
       row.append(heading);
       const feedback = valueFor(grade, 'feedback', 'excerpt');
@@ -400,6 +404,7 @@
   function dismissMenu() { const menu = document.getElementById('item-context-menu'); if (!menu || menu.classList.contains('hidden')) return false; menu.classList.add('hidden'); return true; }
   function dismissFilter() { const popover = document.getElementById('filter-popover'); if (!popover || popover.classList.contains('hidden')) return false; popover.classList.add('hidden'); document.getElementById('filter-toggle')?.setAttribute('aria-expanded', 'false'); return true; }
   function bindActions() {
+    initializeClickAudio();
     const tabNames = ['today', 'courses', 'settings'];
     tabNames.forEach((tab, index) => { const node = document.getElementById(`tab-${tab}`); if (!node) return; node.addEventListener('click', () => switchTab(tab)); node.addEventListener('keydown', event => { let next = null; if (event.key === 'ArrowRight') next = (index + 1) % tabNames.length; if (event.key === 'ArrowLeft') next = (index - 1 + tabNames.length) % tabNames.length; if (event.key === 'Home') next = 0; if (event.key === 'End') next = tabNames.length - 1; if (next == null) return; event.preventDefault(); switchTab(tabNames[next], true, true); }); });
     document.querySelectorAll('button').forEach(node => {
@@ -420,6 +425,8 @@
     document.querySelector('#view-settings input[type="range"]')?.addEventListener('change', event => request('updateSettings', { refreshMinutes: Number(event.target.value) }, 'main', event.target));
     document.querySelectorAll('select').forEach(select => select.addEventListener('change', () => request('updateChannel', { channel: select.value }, 'main', select)));
     document.getElementById('inspector-back')?.addEventListener('click', closeInspectorSafe); document.getElementById('inspector-close')?.addEventListener('click', closeInspectorSafe);
+    document.addEventListener('pointerdown', event => playClickFor(event.target), true);
+    document.addEventListener('keydown', event => { if ((event.key === 'Enter' || event.key === ' ') && !event.repeat) playClickFor(event.target); }, true);
     document.addEventListener('click', event => { const menu = document.getElementById('item-context-menu'); if (!event.target.closest('#item-context-menu')) dismissMenu(); if (!event.target.closest('#filter-popover') && !event.target.closest('#filter-toggle')) dismissFilter(); const actionButton = event.target.closest('[data-action]'); if (!actionButton) return; const rawAction = actionButton.dataset.action; if (rawAction.startsWith('selectTab:')) return; if (rawAction === 'closeInspector') return closeInspectorSafe(); if (rawAction === 'clearCache' && !window.confirm('Clear the saved dashboard? Pipo will fetch it again on refresh.')) return; const itemID = selectedType === 'course' ? null : selectedItem?.id; const courseID = actionButton.dataset.courseId || (selectedType === 'course' ? (selectedItem?.id || selectedItem?.courseID) : null); const payload = actionButton.dataset.lmsRoot === 'true' ? { lmsRoot: true } : rawAction === 'refreshSection' ? { section: actionButton.dataset.section } : rawAction === 'loadCourse' ? { courseID, openToken: inspectorOpenToken } : courseID ? { courseID } : itemID ? { itemID } : {}; const source = actionButton.closest('#inspector-panel') ? 'inspector' : 'main'; request(rawAction, payload, source, actionButton); dismissMenu(); event.preventDefault(); event.stopImmediatePropagation(); }, true);
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.preventDefault(); if (dismissMenu()) return; if (dismissFilter()) { document.getElementById('filter-toggle')?.focus(); return; } if (closeInspectorSafe()) return; request('dismissMenu'); return; }
@@ -431,6 +438,24 @@
     });
     window.addEventListener('resize', syncInspectorModality);
     window.addEventListener('unhandledrejection', event => { event.preventDefault(); showToast('Pipo could not complete that action.'); window.dispatchEvent(new CustomEvent('pipo:error', { detail: event.reason })); });
+  }
+  function initializeClickAudio() {
+    const source = document.getElementById('pipo-click');
+    if (!source) return;
+    source.preload = 'auto'; source.load();
+    clickAudioPool = [source, source.cloneNode(true)];
+    clickAudioPool.forEach(audio => { audio.preload = 'auto'; audio.load(); });
+  }
+  function playClickFor(target) {
+    const control = target?.closest?.('button, [role="button"], input, select, a, [tabindex="0"]');
+    if (!control || control.disabled || control.getAttribute('aria-disabled') === 'true') return;
+    const now = performance.now();
+    const previous = lastSoundAt.get(control);
+    if (previous != null && now - previous < 120) return;
+    lastSoundAt.set(control, now);
+    const audio = clickAudioPool.find(item => item.paused || item.ended);
+    if (!audio) return;
+    audio.currentTime = 0; audio.play().catch(() => {});
   }
   window.pipoMenu = Object.freeze({ applyState, filterCards, request, switchTab, mode });
   window.addEventListener('message', event => { if (event.data?.type === 'pipo:state') applyState(event.data.state); if (event.data?.type === 'pipo:response') resolveResponse(event.data); });

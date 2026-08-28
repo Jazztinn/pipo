@@ -11,10 +11,18 @@ package final class PipoMenuHostLayout {
 }
 
 package enum PipoMenuPanelGeometry {
-    package static let compactSize = CGSize(width: 420, height: 660)
-    package static let expandedSize = CGSize(width: 760, height: 660)
+    package static let mainSize = CGSize(width: 380, height: 660)
+    package static let inspectorWidth: CGFloat = 340
+    package static let inspectorGap: CGFloat = 16
+    package static let expandedLeadingInset: CGFloat = 24
+    package static let compactSize = mainSize
+    package static let expandedSize = CGSize(
+        width: expandedLeadingInset + inspectorWidth + inspectorGap + mainSize.width,
+        height: mainSize.height
+    )
     package static let rightInset: CGFloat = 8
     package static let topGap: CGFloat = 6
+    package static let cornerRadius: CGFloat = 16
     package static let expansionThreshold: CGFloat = 776
     package static let showDuration: TimeInterval = 0.22
     package static let hideDuration: TimeInterval = 0.18
@@ -47,13 +55,24 @@ package enum PipoMenuPanelGeometry {
     }
 
     package static func mainPaneFrame(in panelFrame: CGRect, inspectorVisible: Bool) -> CGRect {
-        let leadingInset: CGFloat = inspectorVisible ? 368 : 28
-        let trailingInset: CGFloat = 12
-        let available = max(0, panelFrame.width - leadingInset - trailingInset)
+        _ = inspectorVisible
+        let width = min(mainSize.width, panelFrame.width)
         return CGRect(
-            x: panelFrame.minX + leadingInset,
+            x: panelFrame.maxX - width,
             y: panelFrame.minY,
-            width: min(380, available),
+            width: width,
+            height: panelFrame.height
+        )
+    }
+
+    package static func inspectorPaneFrame(in panelFrame: CGRect) -> CGRect {
+        let mainFrame = mainPaneFrame(in: panelFrame, inspectorVisible: true)
+        let availableWidth = max(0, mainFrame.minX - panelFrame.minX - inspectorGap)
+        let width = min(inspectorWidth, availableWidth)
+        return CGRect(
+            x: mainFrame.minX - inspectorGap - width,
+            y: panelFrame.minY,
+            width: width,
             height: panelFrame.height
         )
     }

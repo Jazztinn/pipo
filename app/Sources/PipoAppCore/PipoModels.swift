@@ -517,7 +517,9 @@ public struct CourseDetail: Codable, Equatable, Sendable {
         version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
         course = try container.decode(Course.self, forKey: .course)
         assignments = try container.decodeIfPresent([DashboardItem].self, forKey: .assignments) ?? []
-        grades = try container.decodeIfPresent([CourseGradeItem].self, forKey: .grades) ?? []
+        grades = CourseGradeItem.deduplicated(
+            try container.decodeIfPresent([CourseGradeItem].self, forKey: .grades) ?? []
+        )
         supported = try container.decodeIfPresent(CourseSectionSupport.self, forKey: .supported) ?? CourseSectionSupport()
         destination = try container.decodeIfPresent(String.self, forKey: .destination) ?? ""
         failures = try container.decodeIfPresent([String].self, forKey: .failures) ?? []
@@ -555,6 +557,8 @@ public struct CourseSectionSupport: Codable, Equatable, Sendable {
 
 public struct CourseGradeItem: Codable, Equatable, Sendable, Identifiable {
     public let id: String
+    /// Stable LMS grade identity. Older cached responses fall back to `id`.
+    public let entityKey: String
     public let title: String
     public let publishedGrade: String?
     public let feedback: String?
@@ -562,7 +566,25 @@ public struct CourseGradeItem: Codable, Equatable, Sendable, Identifiable {
     public let destination: String
 
     enum CodingKeys: String, CodingKey {
-        case id, title, publishedGrade = "published_grade", feedback, timestamp, destination
+        case id, entityKey = "entity_key", title, publishedGrade = "published_grade", feedback, timestamp, destination
+    }
+
+    public init(
+        id: String,
+        entityKey: String? = nil,
+        title: String,
+        publishedGrade: String? = nil,
+        feedback: String? = nil,
+        timestamp: String? = nil,
+        destination: String = ""
+    ) {
+        self.id = id
+        self.entityKey = entityKey?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? id
+        self.title = title
+        self.publishedGrade = publishedGrade
+        self.feedback = feedback
+        self.timestamp = timestamp
+        self.destination = destination
     }
 
     public init(from decoder: Decoder) throws {
@@ -574,6 +596,9 @@ public struct CourseGradeItem: Codable, Equatable, Sendable, Identifiable {
         } else {
             throw PipoCoreError.invalidResponse
         }
+        entityKey = try container.decodeIfPresent(String.self, forKey: .entityKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty ?? id
         title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Published grade"
         publishedGrade = try container.decodeIfPresent(String.self, forKey: .publishedGrade)
         feedback = try container.decodeIfPresent(String.self, forKey: .feedback)
@@ -584,11 +609,17 @@ public struct CourseGradeItem: Codable, Equatable, Sendable, Identifiable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
+        try container.encode(entityKey, forKey: .entityKey)
         try container.encode(title, forKey: .title)
         try container.encodeIfPresent(publishedGrade, forKey: .publishedGrade)
         try container.encodeIfPresent(feedback, forKey: .feedback)
         try container.encodeIfPresent(timestamp, forKey: .timestamp)
         try container.encode(destination, forKey: .destination)
+    }
+
+    static func deduplicated(_ grades: [CourseGradeItem]) -> [CourseGradeItem] {
+        var seen = Set<String>()
+        return grades.filter { seen.insert($0.entityKey).inserted }
     }
 }
 

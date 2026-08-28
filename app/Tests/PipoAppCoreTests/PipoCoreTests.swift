@@ -324,6 +324,26 @@ import Testing
     #expect(detail.supported.grades)
 }
 
+@Test func courseGradeEntityKeysDecodeBackwardsAndDeduplicateOnlyEqualRecords() throws {
+    let data = Data("""
+    {"course":{"id":12,"name":"History"},"grades":[
+      {"id":91,"entity_key":"grade:12:91","title":"Quiz","published_grade":"18 / 20"},
+      {"id":91,"entity_key":"grade:12:91","title":"Duplicate","published_grade":"18 / 20"},
+      {"id":92,"entity_key":"grade:12:92","title":"Quiz","published_grade":"92%"},
+      {"id":93,"title":"Essay","published_grade":"1.50"},
+      {"id":94,"title":"Unavailable"}
+    ]}
+    """.utf8)
+    let detail = try JSONDecoder().decode(CourseDetail.self, from: data)
+    #expect(detail.grades.count == 4)
+    #expect(detail.grades.map(\.publishedGrade) == ["18 / 20", "92%", "1.50", nil])
+    #expect(detail.grades[0].entityKey == "grade:12:91")
+    #expect(detail.grades[1].entityKey == "grade:12:92")
+    #expect(detail.grades[1].title == "Quiz")
+    #expect(detail.grades[2].entityKey == "93")
+    #expect(detail.grades[3].publishedGrade == nil)
+}
+
 @MainActor
 @Test func signOutDeletesTokenAndCachedDashboard() async {
     let tokenStore = TestTokenStore(token: "stored-token")

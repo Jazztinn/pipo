@@ -742,6 +742,7 @@ public struct PipoRootView: View {
     @State private var selectedTab: PipoTab = .today
     @State private var selectedCourseID: String?
     @State private var isSignOutConfirmationPresented = false
+    @State private var isMenuInspectorVisible = false
 
     public init(
         model: PipoModel,
@@ -794,39 +795,12 @@ public struct PipoRootView: View {
                     onSignOut: { isSignOutConfirmationPresented = true }
                 )
             } else {
-                switch visiblePhase {
-                case .onboarding:
-                PipoOnboardingView(
-                    transparentOuterHost: true,
-                    onPasswordSignIn: signInWithPassword,
-                    onTokenSignIn: signInWithToken,
-                    onOpenURL: openURL
-                )
-            case .loading:
-                PipoGlassStatusView(
-                    title: "Connecting to LPU Cavite LMS",
-                    systemImage: "arrow.triangle.2.circlepath",
-                    transparentOuterHost: true
-                )
-            case .failed(let message):
-                PipoOnboardingView(
-                    externalError: message,
-                    transparentOuterHost: true,
-                    onPasswordSignIn: signInWithPassword,
-                    onTokenSignIn: signInWithToken,
-                    onOpenURL: openURL
-                )
-                default:
-                    PipoWebMenuView(
-                        model: model,
-                        configuration: configuration,
-                        hostMode: hostMode,
-                        onSignOut: { isSignOutConfirmationPresented = true },
-                        onDismissMenu: onMenuDismiss,
-                        onInspectorVisibilityChanged: { visible in
-                            _ = onMenuInspectorVisibilityChanged(visible)
-                        }
+                ZStack(alignment: .trailing) {
+                    PipoMenuGlassBackdrop(
+                        inspectorVisible: isMenuInspectorVisible,
+                        usesWideHost: menuHostLayout.usesWideHost
                     )
+                    menuContent(for: visiblePhase)
                 }
             }
         }
@@ -910,6 +884,7 @@ public struct PipoRootView: View {
             phase = .onboarding
             snapshot = nil
             selectedCourseID = nil
+            isMenuInspectorVisible = false
         }
     }
 
@@ -923,6 +898,98 @@ public struct PipoRootView: View {
 
     private var menuBarWidth: CGFloat {
         menuHostLayout.width
+    }
+
+    @ViewBuilder
+    private func menuContent(for visiblePhase: PipoUIPhase) -> some View {
+        switch visiblePhase {
+        case .onboarding:
+            PipoOnboardingView(
+                transparentOuterHost: true,
+                onPasswordSignIn: signInWithPassword,
+                onTokenSignIn: signInWithToken,
+                onOpenURL: openURL
+            )
+            .frame(width: PipoMenuPanelGeometry.mainSize.width)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        case .loading:
+            PipoGlassStatusView(
+                title: "Connecting to LPU Cavite LMS",
+                systemImage: "arrow.triangle.2.circlepath",
+                transparentOuterHost: true
+            )
+            .frame(width: PipoMenuPanelGeometry.mainSize.width)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        case .failed(let message):
+            PipoOnboardingView(
+                externalError: message,
+                transparentOuterHost: true,
+                onPasswordSignIn: signInWithPassword,
+                onTokenSignIn: signInWithToken,
+                onOpenURL: openURL
+            )
+            .frame(width: PipoMenuPanelGeometry.mainSize.width)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        default:
+            PipoWebMenuView(
+                model: model,
+                configuration: configuration,
+                hostMode: hostMode,
+                onSignOut: { isSignOutConfirmationPresented = true },
+                onDismissMenu: onMenuDismiss,
+                onInspectorVisibilityChanged: { visible in
+                    isMenuInspectorVisible = visible
+                    _ = onMenuInspectorVisibilityChanged(visible)
+                }
+            )
+        }
+    }
+}
+
+@MainActor
+private struct PipoMenuGlassBackdrop: View {
+    let inspectorVisible: Bool
+    let usesWideHost: Bool
+
+    var body: some View {
+        HStack(spacing: PipoMenuPanelGeometry.inspectorGap) {
+            if inspectorVisible && usesWideHost {
+                PipoMenuGlassSurface()
+                    .frame(width: PipoMenuPanelGeometry.inspectorWidth)
+                    .transition(.identity)
+            }
+            PipoMenuGlassSurface()
+                .frame(width: PipoMenuPanelGeometry.mainSize.width)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .allowsHitTesting(false)
+        .animation(nil, value: inspectorVisible)
+    }
+}
+
+@MainActor
+private struct PipoMenuGlassSurface: View {
+    private let shape = RoundedRectangle(
+        cornerRadius: PipoMenuPanelGeometry.cornerRadius,
+        style: .continuous
+    )
+
+    var body: some View {
+        Group {
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+                shape.fill(Color(red: 23 / 255, green: 22 / 255, blue: 28 / 255).opacity(0.98))
+            } else if #available(macOS 26.0, *) {
+                shape
+                    .fill(Color(red: 23 / 255, green: 22 / 255, blue: 28 / 255).opacity(0.62))
+                    .glassEffect(.regular.tint(PipoPalette.rose.opacity(0.035)), in: shape)
+            } else {
+                shape
+                    .fill(.thinMaterial)
+                    .overlay(shape.fill(Color(red: 23 / 255, green: 22 / 255, blue: 28 / 255).opacity(0.72)))
+            }
+        }
+        .clipShape(shape)
+        .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 1))
     }
 }
 
@@ -938,7 +1005,7 @@ private struct PipoGlassStatusView: View {
             ProgressView().controlSize(.small).tint(PipoPalette.rose)
         }
         .padding(28)
-        .pipoGlassPane(cornerRadius: 16)
+        .modifier(PipoStatusOuterChrome(embeddedInMenuShell: transparentOuterHost))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(transparentOuterHost ? Color.clear : PipoPalette.canvas)
     }
@@ -963,10 +1030,11 @@ private struct PipoOnboardingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .top) {
-                    Image(nsImage: PipoBrandAssets.hollowLogo)
+                    Image(nsImage: PipoBrandAssets.adaptiveHollowLogo)
                         .resizable()
                         .scaledToFit()
                         .frame(width: 44, height: 44)
+                        .foregroundStyle(.primary)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Pipo")
@@ -1065,9 +1133,7 @@ private struct PipoOnboardingView: View {
             }
             .padding(24)
             .foregroundStyle(.white)
-            .frame(maxWidth: 420)
-            .pipoGlassPane(cornerRadius: 16)
-            .padding(20)
+            .modifier(PipoOnboardingOuterChrome(embeddedInMenuShell: transparentOuterHost))
         }
         .scrollIndicators(.hidden)
         .scrollContentBackground(.hidden)
@@ -1115,6 +1181,35 @@ private struct PipoOnboardingView: View {
         let submittedToken = token
         token = ""
         onTokenSignIn(submittedToken)
+    }
+}
+
+private struct PipoStatusOuterChrome: ViewModifier {
+    let embeddedInMenuShell: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if embeddedInMenuShell {
+            content
+        } else {
+            content.pipoGlassPane(cornerRadius: 16)
+        }
+    }
+}
+
+private struct PipoOnboardingOuterChrome: ViewModifier {
+    let embeddedInMenuShell: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if embeddedInMenuShell {
+            content.frame(maxWidth: .infinity)
+        } else {
+            content
+                .frame(maxWidth: 420)
+                .pipoGlassPane(cornerRadius: 16)
+                .padding(20)
+        }
     }
 }
 

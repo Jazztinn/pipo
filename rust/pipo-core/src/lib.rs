@@ -1743,8 +1743,8 @@ fn resource_items(value: &Value, course: &Value) -> Vec<Value> {
         .collect()
 }
 fn published_grade_items(value: &Value, course: &Value) -> Vec<Value> {
-    value.get("usergrades").and_then(Value::as_array).and_then(|items| items.first()).and_then(|grade| grade.get("gradeitems")).and_then(Value::as_array).into_iter().flatten().filter(|grade| grade.get("hidden").and_then(Value::as_i64).unwrap_or(0) == 0).map(|grade| {
-        let published_grade = grade.get("gradeformatted").cloned().unwrap_or(Value::Null);
+    deduplicate_grade_records(value.get("usergrades").and_then(Value::as_array).and_then(|items| items.first()).and_then(|grade| grade.get("gradeitems")).and_then(Value::as_array).into_iter().flatten().filter(|grade| grade.get("hidden").and_then(Value::as_i64).unwrap_or(0) == 0).map(|grade| {
+        let published_grade = normalized_grade_display(grade);
         let feedback = grade.get("feedback").and_then(Value::as_str).and_then(plain_feedback);
         let id = grade.get("id").cloned().unwrap_or(Value::Null);
         let course_id = course.get("id").cloned().unwrap_or(Value::Null);
@@ -1759,15 +1759,15 @@ fn published_grade_items(value: &Value, course: &Value) -> Vec<Value> {
             "instructor": course.get("instructor"),
             "timestamp": grade.get("gradedategraded").map(timestamp_value).unwrap_or(Value::Null),
             "destination": "",
-            "detail": published_grade,
+            "detail": published_grade.clone(),
             "excerpt": feedback,
             "is_total": grade.get("itemtype").and_then(Value::as_str) == Some("course"),
-            "published_total": grade.get("gradeformatted")
+            "published_total": published_grade
         })
-    }).collect()
+    }))
 }
 fn course_grade_items(value: &Value, course: &Value) -> Vec<Value> {
-    value
+    deduplicate_grade_records(value
         .get("usergrades")
         .and_then(Value::as_array)
         .and_then(|items| items.first())
@@ -1786,12 +1786,71 @@ fn course_grade_items(value: &Value, course: &Value) -> Vec<Value> {
                 "entity_key": entity_key,
                 "title": grade.get("itemname").cloned().unwrap_or(Value::String("Published grade".to_owned())),
                 "instructor": course.get("instructor"),
-                "published_grade": grade.get("gradeformatted"),
+                "published_grade": normalized_grade_display(grade),
                 "feedback": grade.get("feedback").and_then(Value::as_str).and_then(plain_feedback),
                 "timestamp": grade.get("gradedategraded").map(timestamp_value).unwrap_or(Value::Null),
                 "destination": destination,
                 "is_total": grade.get("itemtype").and_then(Value::as_str) == Some("course")
             })
+        })
+    )
+}
+
+/// Moodle can expose a score in several fields. Prefer the LMS-formatted value
+/// so decimal precision and local grading formats survive the bridge.
+fn normalized_grade_display(grade: &Value) -> Value {
+    for field in ["gradeformatted", "percentageformatted"] {
+        if let Some(value) = meaningful_grade_text(grade.get(field)) {
+            return Value::String(value);
+        }
+    }
+
+    let Some(raw) = numeric_grade_text(grade.get("graderaw")) else {
+        return Value::Null;
+    };
+    match numeric_grade_text(grade.get("grademax")) {
+        Some(maximum) => Value::String(format!("{raw} / {maximum}")),
+        None => Value::String(raw),
+    }
+}
+
+fn meaningful_grade_text(value: Option<&Value>) -> Option<String> {
+    let value = value?.as_str()?.trim();
+    if value.is_empty()
+        || matches!(value, "-" | "–" | "—")
+        || value.eq_ignore_ascii_case("n/a")
+        || value.eq_ignore_ascii_case("na")
+    {
+        return None;
+    }
+    Some(value.to_owned())
+}
+
+fn numeric_grade_text(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::Number(number) => Some(number.to_string()),
+        Value::String(value) => {
+            let value = value.trim();
+            value
+                .parse::<f64>()
+                .ok()
+                .filter(|number| number.is_finite())?;
+            Some(value.to_owned())
+        }
+        _ => None,
+    }
+}
+
+fn deduplicate_grade_records(items: impl IntoIterator<Item = Value>) -> Vec<Value> {
+    let mut seen = HashSet::new();
+    items
+        .into_iter()
+        .filter(|item| {
+            item.get("entity_key")
+                .and_then(Value::as_str)
+                .filter(|key| !key.is_empty())
+                .map(|key| seen.insert(key.to_owned()))
+                .unwrap_or(true)
         })
         .collect()
 }
@@ -2070,6 +2129,46 @@ mod tests {
             grades[0]["excerpt"],
             "Clear argument and strong references."
         );
+    }
+    #[test]
+    fn grade_display_prefers_formatted_values_then_raw_score() {
+        let course = json!({ "id": 12, "name": "Understanding the Self" });
+        let grades = course_grade_items(
+            &json!({
+                "usergrades": [{ "gradeitems": [
+                    { "id": 1, "itemname": "Points", "gradeformatted": "18 / 20", "percentageformatted": "90%", "graderaw": 18, "grademax": 20, "hidden": 0 },
+                    { "id": 2, "itemname": "Percent", "gradeformatted": "—", "percentageformatted": "92%", "graderaw": 18.4, "grademax": 20, "hidden": 0 },
+                    { "id": 3, "itemname": "Decimal", "gradeformatted": "1.50", "hidden": 0 },
+                    { "id": 4, "itemname": "Raw", "graderaw": 18, "grademax": 20, "hidden": 0 },
+                    { "id": 5, "itemname": "Unavailable", "gradeformatted": "-", "hidden": 0 }
+                ] }]
+            }),
+            &course,
+        );
+        assert_eq!(grades[0]["published_grade"], "18 / 20");
+        assert_eq!(grades[1]["published_grade"], "92%");
+        assert_eq!(grades[2]["published_grade"], "1.50");
+        assert_eq!(grades[3]["published_grade"], "18 / 20");
+        assert!(grades[4]["published_grade"].is_null());
+    }
+    #[test]
+    fn grade_records_deduplicate_equal_ids_but_keep_distinct_lms_activities() {
+        let course = json!({ "id": 12, "name": "Understanding the Self" });
+        let grades = course_grade_items(
+            &json!({
+                "usergrades": [{ "gradeitems": [
+                    { "id": 91, "itemname": "Quiz", "gradeformatted": "18 / 20", "hidden": 0 },
+                    { "id": 91, "itemname": "Quiz duplicate", "gradeformatted": "18 / 20", "hidden": 0 },
+                    { "id": 92, "itemname": "Quiz", "gradeformatted": "19 / 20", "hidden": 0 },
+                    { "id": 93, "itemname": "Hidden", "gradeformatted": "20 / 20", "hidden": 1 }
+                ] }]
+            }),
+            &course,
+        );
+        assert_eq!(grades.len(), 2);
+        assert_eq!(grades[0]["id"], 91);
+        assert_eq!(grades[1]["id"], 92);
+        assert_eq!(grades[0]["title"], "Quiz");
     }
     #[test]
     fn direct_message_uses_member_name_and_last_message() {

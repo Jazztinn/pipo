@@ -1,10 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="660" height="420" viewBox="0 0 660 420">
-  <rect width="660" height="420" fill="#171717"/>
-  <rect x="18" y="18" width="624" height="384" rx="22" fill="#750F20"/>
-  <circle cx="72" cy="72" r="5" fill="#F4BE32"/>
-  <text x="92" y="82" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="30" font-weight="700">Install Pipo</text>
-  <text x="330" y="125" fill="#E7E2E2" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="16" text-anchor="middle">Drag Pipo into Applications</text>
-  <path d="M270 236 H390" fill="none" stroke="#F4BE32" stroke-width="8" stroke-linecap="round"/>
-  <path d="M374 217 L394 236 L374 255" fill="none" stroke="#F4BE32" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="330" y="368" fill="#D8C7CA" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" text-anchor="middle">Requires macOS 14 or later</text>
+  <defs>
+    <linearGradient id="canvas" x1="40" y1="0" x2="620" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#21191D"/>
+      <stop offset="0.55" stop-color="#171418"/>
+      <stop offset="1" stop-color="#121114"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FCF8F9"/>
+      <stop offset="1" stop-color="#EDE7E9"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(102 68) rotate(25) scale(300 210)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8C1830" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#8C1830" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="660" height="420" fill="url(#canvas)"/>
+  <rect width="660" height="420" fill="url(#glow)"/>
+
+  <text x="330" y="92" fill="#C9C2C5" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" text-anchor="middle">Drag Pipo to the Applications folder</text>
+
+  <rect x="90" y="128" width="200" height="208" rx="24" fill="url(#card)" stroke="#FFFFFF" stroke-opacity="0.72"/>
+  <rect x="370" y="128" width="200" height="208" rx="24" fill="url(#card)" stroke="#FFFFFF" stroke-opacity="0.72"/>
+
 </svg>

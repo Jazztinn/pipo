@@ -12,9 +12,16 @@ public enum PipoBrandAssets {
     }()
 
     public static let hollowTemplateLogo: NSImage = {
-        let image = hollowLogo.copy() as? NSImage ?? hollowLogo
+        let image = adaptiveHollowLogo.copy() as? NSImage ?? adaptiveHollowLogo
         image.isTemplate = true
         image.size = NSSize(width: 18, height: 19)
+        return image
+    }()
+
+    public static let adaptiveHollowLogo: NSImage = {
+        let image = hollowLogo.copy() as? NSImage ?? hollowLogo
+        image.isTemplate = true
+        image.accessibilityDescription = "Pipo"
         return image
     }()
 }
