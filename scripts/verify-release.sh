@@ -19,8 +19,8 @@ test -s "$APP/Contents/Resources/Legal/LICENSE.txt"
 test -s "$APP/Contents/Resources/Legal/THIRD_PARTY_NOTICES.md"
 plutil -lint "$APP/Contents/Info.plist"
 codesign --verify --deep --strict --verbose=2 "$APP"
-lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/PipoApp"
-lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/pipo-core"
+lipo "$APP/Contents/MacOS/PipoApp" -verify_arch arm64 x86_64
+lipo "$APP/Contents/MacOS/pipo-core" -verify_arch arm64 x86_64
 if [ "${REQUIRE_NOTARIZATION:-0}" = "1" ]; then
   spctl --assess --type execute --verbose=2 "$APP"
   xcrun stapler validate "$APP"

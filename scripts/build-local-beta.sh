@@ -83,7 +83,7 @@ sign_path "$APP/Contents/MacOS/pipo-core"
 sign_path "$APP/Contents/MacOS/PipoApp"
 sign_path "$APP"
 codesign --verify --deep --strict "$APP"
-lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/PipoApp"
-lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/pipo-core"
+lipo "$APP/Contents/MacOS/PipoApp" -verify_arch arm64 x86_64
+lipo "$APP/Contents/MacOS/pipo-core" -verify_arch arm64 x86_64
 
 echo "$APP"
