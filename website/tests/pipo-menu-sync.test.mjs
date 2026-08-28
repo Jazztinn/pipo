@@ -86,8 +86,9 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(runtime, /requestAnimationFrame\(\(\) => window\.requestAnimationFrame/);
   assert.match(runtime, /event\.target === inspector && event\.animationName === 'inspector-panel-out'/);
   assert.match(runtime, /inspector\.dataset\.closing !== 'true'/);
-  assert.match(html, /@keyframes inspector-panel-in \{\s*from \{ transform:[^}]+\}\s*to \{ transform:[^}]+\}/);
-  assert.match(html, /@keyframes inspector-panel-out \{\s*from \{ transform:[^}]+\}\s*to \{ transform:[^}]+\}/);
+  assert.match(html, /@keyframes inspector-panel-in \{[\s\S]*from \{ transform: translateX\(calc\(var\(--inspector-enter-offset, 24px\) \* -1\)\); \}[\s\S]*to \{ transform: translateX\(0\); \}/);
+  assert.match(html, /@keyframes inspector-panel-out \{[\s\S]*from \{ transform: translateX\(0\); \}[\s\S]*to \{ transform: translateX\(calc\(var\(--inspector-enter-offset, 24px\) \* -1\)\); \}/);
+  assert.match(html, /html\[data-host-mode="menuBar"\] body > \.relative > #inspector-panel \{[^}]*z-index: 10/);
   assert.match(html, /\.inspector-enter \{\s*animation: inspector-panel-in 220ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both/);
   assert.match(html, /\.inspector-exit \{\s*animation: inspector-panel-out 220ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both/);
   assert.match(rootView, /\.frame\(maxWidth: hostMode == \.menuBar \? \.infinity : nil, alignment: \.trailing\)/);

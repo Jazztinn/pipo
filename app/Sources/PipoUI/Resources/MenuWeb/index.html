@@ -343,13 +343,14 @@
     .item-secondary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     @keyframes inspector-panel-in {
-      from { transform: translateX(var(--inspector-enter-offset, 24px)); }
+      /* Travel from left edge so inspector never crosses main pane. */
+      from { transform: translateX(calc(var(--inspector-enter-offset, 24px) * -1)); }
       to { transform: translateX(0); }
     }
 
     @keyframes inspector-panel-out {
       from { transform: translateX(0); }
-      to { transform: translateX(var(--inspector-enter-offset, 24px)); }
+      to { transform: translateX(calc(var(--inspector-enter-offset, 24px) * -1)); }
     }
 
     @media (prefers-reduced-motion: reduce) {
