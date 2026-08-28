@@ -7,15 +7,17 @@ enum PipoResources {
         let fileManager = FileManager.default
         var candidates: [URL] = []
 
-        if let resourceURL = Bundle.main.resourceURL {
-            candidates.append(resourceURL.appendingPathComponent(bundleName, isDirectory: true))
-        }
-        candidates.append(Bundle.main.bundleURL.appendingPathComponent(bundleName, isDirectory: true))
+        var searchRoots = [Bundle.main.bundleURL]
+        if let resourceURL = Bundle.main.resourceURL { searchRoots.append(resourceURL) }
         if let executableURL = Bundle.main.executableURL {
-            candidates.append(
-                executableURL.deletingLastPathComponent()
-                    .appendingPathComponent(bundleName, isDirectory: true)
-            )
+            searchRoots.append(executableURL.deletingLastPathComponent())
+        }
+        for root in searchRoots {
+            var directory = root
+            for _ in 0..<5 {
+                candidates.append(directory.appendingPathComponent(bundleName, isDirectory: true))
+                directory.deleteLastPathComponent()
+            }
         }
 
         return candidates.first { fileManager.fileExists(atPath: $0.path) }
