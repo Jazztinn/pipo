@@ -742,7 +742,6 @@ public struct PipoRootView: View {
     @State private var selectedTab: PipoTab = .today
     @State private var selectedCourseID: String?
     @State private var isSignOutConfirmationPresented = false
-    @State private var isMenuInspectorVisible = false
 
     public init(
         model: PipoModel,
@@ -796,10 +795,10 @@ public struct PipoRootView: View {
                 )
             } else {
                 ZStack(alignment: .trailing) {
-                    PipoMenuGlassBackdrop(
-                        inspectorVisible: isMenuInspectorVisible,
-                        usesWideHost: menuHostLayout.usesWideHost
-                    )
+                    // Keep main shell mounted for whole menu session. Inspector
+                    // owns its complete visual shell in WebKit so its glass,
+                    // chrome, and content share one animation transform.
+                    PipoMenuGlassBackdrop()
                     menuContent(for: visiblePhase)
                 }
             }
@@ -884,7 +883,6 @@ public struct PipoRootView: View {
             phase = .onboarding
             snapshot = nil
             selectedCourseID = nil
-            isMenuInspectorVisible = false
         }
     }
 
@@ -938,7 +936,6 @@ public struct PipoRootView: View {
                 onSignOut: { isSignOutConfirmationPresented = true },
                 onDismissMenu: onMenuDismiss,
                 onInspectorVisibilityChanged: { visible in
-                    isMenuInspectorVisible = visible
                     _ = onMenuInspectorVisibilityChanged(visible)
                 }
             )
@@ -948,22 +945,11 @@ public struct PipoRootView: View {
 
 @MainActor
 private struct PipoMenuGlassBackdrop: View {
-    let inspectorVisible: Bool
-    let usesWideHost: Bool
-
     var body: some View {
-        HStack(spacing: PipoMenuPanelGeometry.inspectorGap) {
-            if inspectorVisible && usesWideHost {
-                PipoMenuGlassSurface()
-                    .frame(width: PipoMenuPanelGeometry.inspectorWidth)
-                    .transition(.identity)
-            }
-            PipoMenuGlassSurface()
-                .frame(width: PipoMenuPanelGeometry.mainSize.width)
-        }
+        PipoMenuGlassSurface()
+            .frame(width: PipoMenuPanelGeometry.mainSize.width)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .allowsHitTesting(false)
-        .animation(nil, value: inspectorVisible)
     }
 }
 

@@ -38,14 +38,22 @@
       box-shadow: none;
     }
 
-    /* Native menu host owns persistent glass shell. Child panes stay geometry-only. */
-    html[data-host-mode="menuBar"] #main-panel.mac-window,
-    html[data-host-mode="menuBar"] #inspector-panel.mac-window {
+    /* Native menu host owns the persistent main glass shell. */
+    html[data-host-mode="menuBar"] #main-panel.mac-window {
       background: transparent;
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
       border-color: transparent;
       box-shadow: none;
+    }
+
+    /* Inspector shell and content move as one WebKit-composited object. */
+    html[data-host-mode="menuBar"] #inspector-panel.mac-window {
+      background: rgba(23, 22, 28, 0.88);
+      backdrop-filter: blur(40px) saturate(200%);
+      -webkit-backdrop-filter: blur(40px) saturate(200%);
+      border-color: rgba(255, 255, 255, 0.12);
+      box-shadow: 0 16px 38px rgba(0, 0, 0, 0.28), 0 0 1px rgba(255, 255, 255, 0.16);
     }
 
     html[data-host-mode="menuBar"] {
@@ -175,6 +183,60 @@
     }
 
     #main-panel { min-height: 0; }
+    /* Shared header geometry. Keep title and status in separate, fixed lanes. */
+    #pipo-header {
+      position: relative;
+      flex: 0 0 40px;
+      width: 100%;
+      height: 40px;
+      min-height: 40px;
+      max-height: 40px;
+      box-sizing: border-box;
+      padding: 0 16px;
+    }
+    #header-title {
+      position: absolute;
+      top: 0;
+      right: auto;
+      bottom: 0;
+      left: 50%;
+      width: 112px;
+      height: 40px;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      box-sizing: border-box;
+    }
+    #sync-button {
+      position: absolute;
+      top: 50%;
+      right: 16px;
+      left: auto;
+      width: max-content;
+      max-width: 112px;
+      min-width: 0;
+      transform: translateY(-50%);
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    #sync-status {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #search-section {
+      flex: 0 0 62px;
+      height: 62px;
+      min-height: 62px;
+      max-height: 62px;
+      box-sizing: border-box;
+    }
+    #search-section.hidden { display: none; }
     #main-panel > .view-panel { flex: 1 1 auto; min-height: 0; height: auto !important; overscroll-behavior: contain; scrollbar-gutter: stable; }
     #main-panel > .view-panel.hidden { display: none; }
     #main-navigation { flex: 0 0 58px; position: relative; z-index: 30; height: 58px; min-height: 58px; max-height: 58px; padding: 7px 14px 12px; box-shadow: 0 -12px 28px rgba(12, 11, 15, .18); box-sizing: border-box; }
@@ -246,7 +308,7 @@
     }
 
     .inspector-exit {
-      animation: inspector-panel-out 180ms cubic-bezier(.4, 0, 1, 1) both;
+      animation: inspector-panel-out 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
       pointer-events: none;
       will-change: transform;
     }

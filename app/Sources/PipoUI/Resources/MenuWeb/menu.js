@@ -137,6 +137,14 @@
   function revealInspector(token) {
     const inspector = document.getElementById('inspector-panel');
     if (!inspector || token !== inspectorOpenToken || Number(inspector.dataset.openToken || 0) !== token || inspector.dataset.closing === 'true') return;
+    // Native receives visibility for host interaction policy only. WebKit owns
+    // inspector shell and content, so start their shared transition immediately.
+    if (!inspector.classList.contains('hidden')) {
+      delete inspector.dataset.opening;
+      inspector.setAttribute('aria-hidden', 'false');
+      syncInspectorModality();
+      return;
+    }
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
       if (token !== inspectorOpenToken || Number(inspector.dataset.openToken || 0) !== token || inspector.dataset.closing === 'true') return;
       inspector.classList.remove('hidden', 'inspector-enter', 'inspector-exit');
@@ -151,7 +159,10 @@
   }
   function openItemInspector(type, item, skipLoad = false, trigger = null) {
     const inspector = document.getElementById('inspector-panel'); if (!inspector) return;
-    window.clearTimeout(inspectorCloseTimer); inspectorCloseTimer = null; delete inspector.dataset.closing;
+    window.clearTimeout(inspectorCloseTimer); inspectorCloseTimer = null;
+    const wasClosing = inspector.dataset.closing === 'true';
+    delete inspector.dataset.closing;
+    if (wasClosing) inspector.classList.remove('inspector-exit');
     if (trigger) inspectorTrigger = trigger;
     selectedItem = item; selectedType = type;
     const shouldLoadCourse = type === 'course' && mode === 'native' && !skipLoad;
@@ -176,8 +187,8 @@
     inspector.dataset.openToken = String(openToken);
     inspector.setAttribute('aria-hidden', 'true');
     request('setInspectorVisible', { visible: true, itemID: item?.id || null, openToken });
+    revealInspector(openToken);
     if (shouldLoadCourse) request('loadCourse', { courseID: item?.id, openToken });
-    if (!nativeBridge?.request && mode !== 'demo') revealInspector(openToken);
   }
   function syncActivityDetails(type, item) {
     const block = document.getElementById('inspector-activity-details');
