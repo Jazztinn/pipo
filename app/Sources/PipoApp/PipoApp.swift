@@ -50,7 +50,7 @@ final class PipoUpdater: NSObject, SPUUpdaterDelegate {
         updaterDelegate: self,
         userDriverDelegate: nil
     )
-    private var channelObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var channelObserver: NSObjectProtocol?
     private var probeTask: Task<Void, Never>?
     private let defaults: UserDefaults
     private static let lastProbeKey = "pipo.updates.last-information-probe"
