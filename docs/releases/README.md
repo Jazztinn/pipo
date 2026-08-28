@@ -4,6 +4,10 @@ Pipo release automation requires a configured Developer ID identity, Apple
 notary credentials, and the Sparkle EdDSA key. The public appcast is served from
 the repository root. Publication remains a separate, reviewer-approved action.
 
+When Developer ID/notary credentials are unavailable, the workflow can publish
+an explicitly unnotarized, ad-hoc-signed universal build. Release notes must
+retain the macOS first-launch warning. Sparkle EdDSA signing remains required.
+
 Public release checklist:
 
 - Build universal `arm64` and `x86_64` app and core helper.

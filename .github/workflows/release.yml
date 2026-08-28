@@ -13,6 +13,11 @@ on:
         default: stable
         type: choice
         options: [stable, beta]
+      notarize:
+        description: Sign with Developer ID and notarize installer
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -48,6 +53,7 @@ jobs:
           test "$(git tag -l "v$VERSION")" = ""
 
       - name: Import Developer ID certificate
+        if: inputs.notarize
         env:
           CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERT_P12_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
@@ -63,11 +69,11 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
 
-      - name: Build Developer ID signed universal app
+      - name: Build universal app
         env:
-          CODESIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+          CODESIGN_IDENTITY: ${{ inputs.notarize && secrets.DEVELOPER_ID_APPLICATION || '-' }}
         run: |
-          test -n "$CODESIGN_IDENTITY"
+          if [ "${{ inputs.notarize }}" = true ]; then test -n "$CODESIGN_IDENTITY"; fi
           scripts/build-local-beta.sh
           REQUIRE_NOTARIZATION=0 scripts/verify-release.sh dist/Pipo.app
 
@@ -82,6 +88,7 @@ jobs:
         run: scripts/build-dmg.sh dist/Pipo.app "dist/Pipo-$VERSION-universal.dmg"
 
       - name: Sign, notarize, and staple installer
+        if: inputs.notarize
         env:
           VERSION: ${{ inputs.version }}
           CODESIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
@@ -107,6 +114,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           CHANNEL: ${{ inputs.channel }}
+          NOTARIZED: ${{ inputs.notarize }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           UPDATES="$RUNNER_TEMP/updates"
@@ -129,6 +137,9 @@ jobs:
           {
             printf '# Pipo %s\n\n' "$VERSION"
             jq -r '.items[] | "- " + .' app/Sources/PipoUI/Resources/WhatsNew.json
+            if [ "$NOTARIZED" != true ]; then
+              printf '\n> This build is not notarized. macOS may require manual approval before first launch.\n'
+            fi
           } > "$NOTES"
           cp "$NOTES" "$UPDATES/Pipo-$VERSION-universal.md"
           printf '%s' "$SPARKLE_PRIVATE_KEY" | "$RUNNER_TEMP/sparkle/bin/generate_appcast" \
@@ -146,6 +157,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
           CHANNEL: ${{ inputs.channel }}
+          NOTARIZED: ${{ inputs.notarize }}
         run: |
           RELEASE_ARGS=()
           FEED=appcast.xml
@@ -156,6 +168,9 @@ jobs:
           {
             printf '# Pipo %s\n\n' "$VERSION"
             jq -r '.items[] | "- " + .' app/Sources/PipoUI/Resources/WhatsNew.json
+            if [ "$NOTARIZED" != true ]; then
+              printf '\n> This build is not notarized. macOS may require manual approval before first launch.\n'
+            fi
           } > "$RUNNER_TEMP/release-notes.md"
           gh release create "v$VERSION" "dist/Pipo-$VERSION-universal.dmg" \
             --title "Pipo $VERSION" \
