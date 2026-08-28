@@ -100,6 +100,7 @@ func menuHostWidthIsFixedForOpenSession() {
 }
 
 @Test
+@MainActor
 func webMenuBootstrapInstallsHostGeometryBeforePageScripts() {
     let bootstrap = PipoWebMenuView.bootstrap(hostMode: .menuBar)
     #expect(bootstrap.contains("root.dataset.hostMode = \"menuBar\""))
