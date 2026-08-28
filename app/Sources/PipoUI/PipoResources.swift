@@ -20,7 +20,28 @@ enum PipoResources {
             }
         }
 
-        return candidates.first { fileManager.fileExists(atPath: $0.path) }
+        if let packaged = candidates.first(where: { fileManager.fileExists(atPath: $0.path) }) {
+            return packaged
+        }
+
+        var packageRoot = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { packageRoot.deleteLastPathComponent() }
+        let developmentRoots = [
+            packageRoot.appendingPathComponent(".build", isDirectory: true),
+            URL(fileURLWithPath: fileManager.currentDirectoryPath)
+                .appendingPathComponent(".build", isDirectory: true),
+        ]
+        for root in developmentRoots where fileManager.fileExists(atPath: root.path) {
+            guard let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for case let url as URL in enumerator where url.lastPathComponent == bundleName {
+                return url
+            }
+        }
+        return nil
     }
 
     static func url(
