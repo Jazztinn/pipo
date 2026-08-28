@@ -168,7 +168,7 @@ import Testing
 
 @Test func sidecarReadsShortPipeResponsesWithoutWaitingForBufferCapacity() async throws {
     let transport = PipoCoreProcessTransport(executableURL: URL(fileURLWithPath: "/bin/cat"))
-    let request = SidecarRequest(method: "probe")
+    let request = SidecarRequest(method: "probe", params: [:])
     let response = try await transport.send(request)
     #expect(response.id == request.id)
     await transport.shutdown()
