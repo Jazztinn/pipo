@@ -90,7 +90,7 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(html, /@keyframes inspector-panel-out \{[\s\S]*from \{ transform: translateX\(0\); \}[\s\S]*to \{ transform: translateX\(var\(--inspector-enter-offset, 24px\)\); \}/);
   assert.match(html, /html\[data-host-mode="menuBar"\] body > \.relative > #inspector-viewport \{[^}]*z-index: 10/);
   assert.match(html, /#inspector-viewport\.is-transitioning \{\s*overflow: hidden/);
-  assert.match(html, /#inspector-viewport\.is-active \{\s*pointer-events: auto/);
+  assert.match(html, /body > \.relative > #inspector-viewport\.is-active \{\s*pointer-events: auto/);
   assert.match(html, /<div id="inspector-viewport">\s*<div id="inspector-panel"/);
   assert.match(runtime, /viewport\?\.classList\.add\('is-transitioning'\)/);
   assert.match(html, /\.inspector-enter \{\s*animation: inspector-panel-in 220ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both/);

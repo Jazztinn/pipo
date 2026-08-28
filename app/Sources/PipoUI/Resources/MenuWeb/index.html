@@ -239,6 +239,7 @@
     #search-section.hidden { display: none; }
     #main-panel > .view-panel { flex: 1 1 auto; min-height: 0; height: auto !important; overscroll-behavior: contain; scrollbar-gutter: stable; }
     #main-panel > .view-panel.hidden { display: none; }
+    #initial-menu-skeleton { position: absolute; inset: 40px 0 58px; }
     #main-navigation { flex: 0 0 58px; position: relative; z-index: 30; height: 58px; min-height: 58px; max-height: 58px; padding: 7px 14px 12px; box-shadow: 0 -12px 28px rgba(12, 11, 15, .18); box-sizing: border-box; }
     #main-navigation .mac-segmented { width: 100%; max-width: none; height: 38px; min-height: 38px; max-height: 38px; padding: 1px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: center; box-sizing: border-box; }
     #main-navigation .mac-segmented-btn { width: 100%; min-width: 0; height: 34px; min-height: 34px; max-height: 34px; padding: 0 8px; border-radius: 8px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; font-weight: 600; line-height: 1; transform: none; }
@@ -273,7 +274,9 @@
       overflow: hidden;
     }
 
-    #inspector-viewport.is-active {
+    /* Match base selector specificity so active inspector can receive clicks
+       inside native menu-bar WKWebView host. */
+    body > .relative > #inspector-viewport.is-active {
       pointer-events: auto;
     }
 
@@ -390,7 +393,7 @@
     :where(button, input, select):focus-visible { outline: 2px solid #ff5277; outline-offset: 2px; }
   </style>
 </head>
-<body>
+<body data-pipo-state-ready="false">
   <audio id="pipo-click" src="./pipoclick.mp3" preload="auto"></audio>
 
   <div id="pipo-shell" class="relative flex gap-4 items-start max-w-5xl w-full justify-center">
@@ -524,14 +527,23 @@
     </div>
 
     <!-- MAIN PIPO POPUP WINDOW -->
-    <div id="main-panel" class="mac-window w-[380px] rounded-2xl flex flex-col overflow-hidden text-[13px] relative z-20 shrink-0">
+    <div id="main-panel" aria-busy="true" class="mac-window w-[380px] rounded-2xl flex flex-col overflow-hidden text-[13px] relative z-20 shrink-0">
+
+      <div id="initial-menu-skeleton" role="status" aria-live="polite" aria-label="Loading Pipo" class="z-50 p-3.5 space-y-3 bg-[#17161ce6]">
+        <div class="h-5 w-32 rounded bg-white/10 animate-pulse"></div>
+        <div class="h-20 rounded-xl bg-white/[0.06] animate-pulse"></div>
+        <div class="h-4 w-24 rounded bg-white/10 animate-pulse"></div>
+        <div class="h-20 rounded-xl bg-white/[0.06] animate-pulse"></div>
+        <div class="h-4 w-28 rounded bg-white/10 animate-pulse"></div>
+        <div class="h-20 rounded-xl bg-white/[0.06] animate-pulse"></div>
+      </div>
 
       <!-- Top Title Bar -->
       <div id="pipo-header" class="h-10 px-4 flex items-center justify-center border-b border-white/10 relative bg-white/[0.02]">
         <span id="header-title" class="absolute inset-0 flex items-center justify-center pointer-events-none text-[13px] font-semibold text-neutral-200 tracking-tight">Today</span>
-        <button id="sync-button" type="button" data-action="refresh" aria-label="Refresh Pipo. Current status: Ready" class="absolute right-4 top-1/2 -translate-y-1/2 max-w-[108px] flex items-center gap-1.5 text-[10px] text-neutral-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 hover:bg-white/10 transition truncate">
-            <span id="sync-dot" data-phase="ready" class="w-1.5 h-1.5 rounded-full bg-neutral-400"></span>
-          <span id="sync-status">Ready</span>
+        <button id="sync-button" type="button" data-action="refresh" aria-label="Connecting to LMS. Refresh Pipo" class="absolute right-4 top-1/2 -translate-y-1/2 max-w-[108px] flex items-center gap-1.5 text-[10px] text-neutral-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 hover:bg-white/10 transition truncate">
+            <span id="sync-dot" data-phase="loading" class="w-1.5 h-1.5 rounded-full bg-neutral-400"></span>
+          <span id="sync-status">Connecting</span>
         </button>
       </div>
 

@@ -367,6 +367,7 @@
     if (courses) reconcileCards(courses, safeArray(state.courses), 'course', state.sectionStatuses?.courses?.status || 'ready');
     const phase = state.phase || 'ready';
     document.documentElement.dataset.phase = phase;
+    document.getElementById('main-panel')?.setAttribute('aria-busy', String(phase === 'loading' || phase === 'authenticating'));
     document.documentElement.dataset.hostMode = state.hostMode || (mode === 'demo' ? 'showcase' : 'menuBar');
     const statusText = phase === 'offline' ? 'Offline cache' : ['loading', 'authenticating', 'reconnecting'].includes(phase) ? 'Connecting' : phase === 'failed' ? 'Sync failed' : phase === 'partialFailure' || state.failures?.length ? 'Partial sync' : phase === 'empty' ? 'No LMS data' : 'Ready';
     const sync = document.getElementById('sync-status'); if (sync) sync.textContent = statusText;
@@ -412,7 +413,7 @@
     if (state.settings && 'refreshMinutes' in state.settings) syncRefreshControl(state.settings.refreshMinutes);
     const channel = document.querySelector('#view-settings select'); if (channel && state.updateChannel) channel.value = state.updateChannel;
   }
-  function applyState(state) { if (!state || typeof state !== 'object' || (Number.isFinite(state.revision) && state.revision <= revision)) return; currentState = state; revision = Number.isFinite(state.revision) ? state.revision : revision + 1; renderState(state); switchTab(state.selectedTab || 'today', false); window.dispatchEvent(new CustomEvent('pipo:stateApplied', { detail: state })); }
+  function applyState(state) { if (!state || typeof state !== 'object' || (Number.isFinite(state.revision) && state.revision <= revision)) return; currentState = state; revision = Number.isFinite(state.revision) ? state.revision : revision + 1; renderState(state); switchTab(state.selectedTab || 'today', false); document.body.dataset.pipoStateReady = 'true'; document.getElementById('initial-menu-skeleton')?.remove(); window.dispatchEvent(new CustomEvent('pipo:stateApplied', { detail: state })); }
   async function loadDemoFixture() { try { const response = await fetch('./demo-fixture.json', { cache: 'no-store' }); if (!response.ok) throw new Error(`fixture ${response.status}`); applyState(await response.json()); } catch (error) { showToast('Demo data unavailable'); window.dispatchEvent(new CustomEvent('pipo:error', { detail: error })); } }
   function applyFilters() { const state = tabState[activeTab]; const query = String(state.query || '').trim().toLowerCase(); document.querySelectorAll('#view-today [data-item-id], #view-courses [data-item-id]').forEach(card => { const belongsToActivePanel = Boolean(card.closest(`#view-${activeTab}`)); if (!belongsToActivePanel) return; const searchMatch = !query || card.textContent.toLowerCase().includes(query); const courseMatch = state.courseFilter === 'all' || card.dataset.course === state.courseFilter; const categoryMatch = activeTab !== 'today' || state.categoryFilter === 'all' || card.dataset.category === state.categoryFilter; card.hidden = !(searchMatch && courseMatch && categoryMatch); }); }
   function filterCards(query) { const value = String(query || ''); tabState[activeTab].query = value; const input = document.getElementById('search-input'); if (input && input.value !== value) input.value = value; applyFilters(); }

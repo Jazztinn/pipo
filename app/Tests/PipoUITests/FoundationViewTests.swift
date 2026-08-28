@@ -116,6 +116,26 @@ func webMenuBootstrapInstallsHostGeometryBeforePageScripts() {
 }
 
 @Test
+@MainActor
+func webMenuShowsSkeletonUntilItsFirstStateAndResetsBridgeStatePerDocument() throws {
+    let root = try #require(PipoWebMenuView.Coordinator.menuResourceRoot)
+    let markup = try String(contentsOf: root.appendingPathComponent("index.html"), encoding: .utf8)
+    let runtime = try String(contentsOf: root.appendingPathComponent("menu.js"), encoding: .utf8)
+    let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let bridge = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PipoUI/PipoWebMenuView.swift"), encoding: .utf8)
+
+    #expect(markup.contains("data-pipo-state-ready=\"false\""))
+    #expect(markup.contains("id=\"initial-menu-skeleton\""))
+    #expect(markup.contains("#initial-menu-skeleton { position: absolute; inset: 40px 0 58px; }"))
+    #expect(runtime.contains("document.body.dataset.pipoStateReady = 'true'"))
+    #expect(runtime.contains("initial-menu-skeleton')?.remove()"))
+    #expect(bridge.contains("lastStateFingerprint = nil"))
+    #expect(bridge.contains("refreshMissingInitialSnapshot()"))
+    #expect(bridge.contains("withObservationTracking"))
+    #expect(bridge.contains("self.pushStateIfReady()"))
+}
+
+@Test
 func webMenuItemUsesCourseInstructorWhenActivityFieldIsMissing() {
     let activity = DashboardItem(
         id: "assignment:12:9",

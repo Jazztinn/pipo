@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import PipoAppCore
 import SwiftUI
 import WebKit
@@ -181,6 +182,7 @@ struct PipoWebMenuView: NSViewRepresentable {
         view.setValue(false, forKey: "drawsBackground")
         context.coordinator.webView = view
         context.coordinator.loadMenu(in: view)
+        context.coordinator.observeModelChanges()
         DispatchQueue.main.async { context.coordinator.observeWindow(of: view) }
         return view
     }
@@ -232,6 +234,7 @@ struct PipoWebMenuView: NSViewRepresentable {
         private var lastStateFingerprint: Data?
         private var ready = false
         private var isClosed = false
+        private var initialRefreshTask: Task<Void, Never>?
         private var selectedTab: String
         private var windowObserver: NSObjectProtocol?
 
@@ -254,6 +257,10 @@ struct PipoWebMenuView: NSViewRepresentable {
         }
 
         func loadMenu(in view: WKWebView) {
+            // New document has a new JS runtime and revision sequence.
+            ready = false
+            revision = 0
+            lastStateFingerprint = nil
             guard let root = Self.menuResourceRoot else {
                 view.loadHTMLString("<p>Pipo menu resources are unavailable.</p>", baseURL: nil)
                 return
@@ -277,6 +284,7 @@ struct PipoWebMenuView: NSViewRepresentable {
 
         func close() {
             isClosed = true
+            initialRefreshTask?.cancel()
             if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) }
             windowObserver = nil
         }
@@ -286,6 +294,7 @@ struct PipoWebMenuView: NSViewRepresentable {
             if request.action == "ui.ready" {
                 ready = true
                 pushState()
+                refreshMissingInitialSnapshot()
                 respond(request.requestID, success: true)
                 return
             }
@@ -412,6 +421,34 @@ struct PipoWebMenuView: NSViewRepresentable {
 
         func pushStateIfReady() { if ready { pushState() } }
 
+        func observeModelChanges() {
+            guard !isClosed else { return }
+            withObservationTracking {
+                _ = model.phase
+                _ = model.snapshot
+                _ = model.refreshDate
+                _ = model.settings
+                _ = model.localState
+                _ = model.secureStorageStatus
+            } onChange: { [weak self] in
+                Task { @MainActor in
+                    guard let self, !self.isClosed else { return }
+                    self.observeModelChanges()
+                    self.pushStateIfReady()
+                }
+            }
+        }
+
+        private func refreshMissingInitialSnapshot() {
+            guard initialRefreshTask == nil, model.snapshot == nil, case .offline = model.phase else { return }
+            initialRefreshTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.model.refresh(force: true)
+                self.initialRefreshTask = nil
+                self.pushStateIfReady()
+            }
+        }
+
         private func pushState() {
             guard !isClosed else { return }
             let fingerprintState = makeState(revision: 0)
@@ -424,9 +461,12 @@ struct PipoWebMenuView: NSViewRepresentable {
 
         private func makeState(revision: Int) -> PipoWebMenuStateV2 {
             let snapshot = model.snapshot
-            let phase = Self.phaseDescription(model.phase)
+            let modelPhase = Self.phaseDescription(model.phase)
+            let phase = snapshot == nil && modelPhase.name == "offline"
+                ? (name: "loading", error: nil)
+                : modelPhase
             let settings = model.settings
-            let cached = phase.name == "offline"
+            let cached = snapshot != nil && phase.name == "offline"
             let source = cached ? "offlineCache" : "live"
             let courses = snapshot?.courses ?? []
             let instructorsByID = courses.reduce(into: [Int: String]()) { result, course in
