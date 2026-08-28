@@ -166,6 +166,14 @@ import Testing
     }
 }
 
+@Test func sidecarReadsShortPipeResponsesWithoutWaitingForBufferCapacity() async throws {
+    let transport = PipoCoreProcessTransport(executableURL: URL(fileURLWithPath: "/bin/cat"))
+    let request = SidecarRequest(method: "probe")
+    let response = try await transport.send(request)
+    #expect(response.id == request.id)
+    await transport.shutdown()
+}
+
 @Test func versionOneSnapshotDecodesWithVersionTwoDefaults() throws {
     let data = Data("""
     {"version":1,"generated_at":"2026-08-21T03:00:00Z","site_name":"LPU","student_name":"Alex","sections":{"due_soon":[],"notifications":[],"new_assignments":[],"messages":[],"grade_feedback":[]},"supported":{"due_soon":true,"notifications":true,"assignments":true,"messages":true,"grades":true},"assignment_ids":[],"courses":[],"failures":[]}

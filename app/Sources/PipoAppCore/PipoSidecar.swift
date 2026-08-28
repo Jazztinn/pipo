@@ -156,8 +156,16 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
                 if ready == 0 { throw PipoCoreError.timedOut }
                 throw PipoCoreError.sidecarUnavailable
             }
-            guard let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty else { throw PipoCoreError.invalidResponse }
-            stdoutBuffer.append(chunk)
+            var bytes = [UInt8](repeating: 0, count: 64 * 1024)
+            let count = bytes.withUnsafeMutableBytes { buffer in
+                Darwin.read(handle.fileDescriptor, buffer.baseAddress, buffer.count)
+            }
+            if count < 0 {
+                if errno == EINTR { continue }
+                throw PipoCoreError.sidecarUnavailable
+            }
+            guard count > 0 else { throw PipoCoreError.invalidResponse }
+            stdoutBuffer.append(contentsOf: bytes.prefix(count))
             guard stdoutBuffer.count <= 8 * 1024 * 1024 else { throw PipoCoreError.invalidResponse }
         }
     }
