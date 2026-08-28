@@ -119,7 +119,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public func presentingNewAssignments(since previousIDs: Set<String>?) -> DashboardSnapshot {
         let visible = previousIDs.map { previous in
             sections.newAssignments.filter { !previous.contains($0.id) }
-        } ?? sections.newAssignments
+        } ?? []
         return DashboardSnapshot(
             version: version,
             generatedAt: generatedAt,

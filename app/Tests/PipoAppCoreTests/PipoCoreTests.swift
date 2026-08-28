@@ -53,7 +53,8 @@ import Testing
     let refreshed = DashboardSnapshot(generatedAt: "new", siteName: "LPU", studentName: "Alex", sections: DashboardSections(), courses: [], failures: ["messages unavailable"], sectionResults: ["messages": .failed])
     let coordinator = DashboardRefreshCoordinator(transport: SnapshotTransport(snapshot: refreshed), cache: InMemoryDashboardCache(snapshot: cached))
     let outcome = try await coordinator.refreshOutcome(token: "token", force: true)
-    #expect(outcome.snapshot.sections.messages == [cachedMessage])
+    #expect(Set(outcome.snapshot.sections.messages.map(\.id)) == ["message", "other"])
+    #expect(outcome.snapshot.sections.messages.contains(cachedMessage))
     #expect(outcome.preservedSections.contains("messages"))
 }
 
