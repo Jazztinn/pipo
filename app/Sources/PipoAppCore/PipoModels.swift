@@ -15,6 +15,18 @@ public enum PipoPhase: Equatable, Sendable {
     case failed(String)
 }
 
+/// Identity fence for async work. Generation changes on account transitions so
+/// late LMS responses cannot repopulate another user's UI or cache.
+public struct PipoSessionContext: Equatable, Sendable {
+    public let accountID: String
+    public let generation: UInt64
+
+    public init(accountID: String = "anonymous", generation: UInt64 = 0) {
+        self.accountID = accountID
+        self.generation = generation
+    }
+}
+
 public struct PipoSettings: Equatable, Sendable {
     public var refreshInterval: TimeInterval = 15 * 60
     public var notificationsEnabled: Bool = true
@@ -107,7 +119,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public func presentingNewAssignments(since previousIDs: Set<String>?) -> DashboardSnapshot {
         let visible = previousIDs.map { previous in
             sections.newAssignments.filter { !previous.contains($0.id) }
-        } ?? []
+        } ?? sections.newAssignments
         return DashboardSnapshot(
             version: version,
             generatedAt: generatedAt,
@@ -208,10 +220,33 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
 
 public struct PipoSyncDiagnostics: Codable, Equatable, Sendable {
     public let lmsCallCount: Int
+    public let retryCount: Int
+    public let heavyCoursesTruncated: Bool
+    public let protocolVersion: Int
 
-    public init(lmsCallCount: Int = 0) { self.lmsCallCount = lmsCallCount }
+    public init(lmsCallCount: Int = 0, retryCount: Int = 0, heavyCoursesTruncated: Bool = false, protocolVersion: Int = 0) {
+        self.lmsCallCount = lmsCallCount
+        self.retryCount = retryCount
+        self.heavyCoursesTruncated = heavyCoursesTruncated
+        self.protocolVersion = protocolVersion
+    }
 
-    enum CodingKeys: String, CodingKey { case lmsCallCount = "lms_call_count" }
+    enum CodingKeys: String, CodingKey {
+        case lmsCallCount = "lms_call_count"
+        case retryCount = "retry_count"
+        case heavyCoursesTruncated = "heavy_courses_truncated"
+        case protocolVersion = "protocol_version"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            lmsCallCount: try container.decodeIfPresent(Int.self, forKey: .lmsCallCount) ?? 0,
+            retryCount: try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0,
+            heavyCoursesTruncated: try container.decodeIfPresent(Bool.self, forKey: .heavyCoursesTruncated) ?? false,
+            protocolVersion: try container.decodeIfPresent(Int.self, forKey: .protocolVersion) ?? 0
+        )
+    }
 }
 
 public enum DashboardSectionStatus: String, Codable, Equatable, Sendable {
@@ -226,11 +261,19 @@ public struct DashboardSectionResult: Codable, Equatable, Sendable {
     public let status: DashboardSectionStatus
     public let fetchedAt: String?
     public let error: String?
+    public let errorCode: String?
+    public let truncated: Bool?
+    public let availableCount: Int?
+    public let retryAfterSeconds: Int?
 
-    public init(status: DashboardSectionStatus, fetchedAt: String? = nil, error: String? = nil) {
+    public init(status: DashboardSectionStatus, fetchedAt: String? = nil, error: String? = nil, errorCode: String? = nil, truncated: Bool? = nil, availableCount: Int? = nil, retryAfterSeconds: Int? = nil) {
         self.status = status
         self.fetchedAt = fetchedAt
         self.error = error
+        self.errorCode = errorCode
+        self.truncated = truncated
+        self.availableCount = availableCount
+        self.retryAfterSeconds = retryAfterSeconds
     }
 
     public static let success = DashboardSectionResult(status: .success)
@@ -240,7 +283,7 @@ public struct DashboardSectionResult: Codable, Equatable, Sendable {
     public static let notRequested = DashboardSectionResult(status: .notRequested)
 
     enum CodingKeys: String, CodingKey {
-        case status, fetchedAt = "refreshed_at", error
+        case status, fetchedAt = "refreshed_at", error, errorCode = "error_code", truncated, availableCount = "available_count", retryAfterSeconds = "retry_after_seconds"
     }
 
     public init(from decoder: Decoder) throws {
@@ -253,7 +296,11 @@ public struct DashboardSectionResult: Codable, Equatable, Sendable {
         self.init(
             status: try container.decode(DashboardSectionStatus.self, forKey: .status),
             fetchedAt: try container.decodeIfPresent(String.self, forKey: .fetchedAt),
-            error: try container.decodeIfPresent(String.self, forKey: .error)
+            error: try container.decodeIfPresent(String.self, forKey: .error),
+            errorCode: try container.decodeIfPresent(String.self, forKey: .errorCode),
+            truncated: try container.decodeIfPresent(Bool.self, forKey: .truncated),
+            availableCount: try container.decodeIfPresent(Int.self, forKey: .availableCount),
+            retryAfterSeconds: try container.decodeIfPresent(Int.self, forKey: .retryAfterSeconds)
         )
     }
 }

@@ -48,7 +48,6 @@ struct PipoSettingsCenterView: View {
     @State private var validationMessage: String?
     @State private var legalDocument: LegalDocument?
     @AppStorage(PipoLegal.acknowledgementKey) private var acceptedLegalVersion = ""
-    @AppStorage(PipoLegal.preReleaseAcknowledgementKey) private var acceptedPreReleaseVersion = ""
     @AppStorage("pipo.updates.channel") private var updateChannel = "stable"
 
     init(model: PipoModel, configuration: PipoUIConfiguration, onSignOut: @escaping () -> Void) {
@@ -153,9 +152,7 @@ struct PipoSettingsCenterView: View {
             }
             .frame(minHeight: 56)
 
-            if needsCredentials && acceptedPreReleaseVersion != PipoLegal.preReleaseVersion {
-                PipoPreReleaseNoticeView()
-            } else if needsCredentials {
+            if needsCredentials {
                 Picker("Sign-in method", selection: $authMethod) {
                     ForEach(PipoAuthMethod.allCases) { method in Text(method.title).tag(method) }
                 }
@@ -320,8 +317,8 @@ struct PipoSettingsCenterView: View {
                     }
                 }
             }
-            Section("Pre-Release & Permissions") {
-                Text("Pipo is pre-release software and is currently unnotarized by Apple. macOS may show security warnings. Features and LMS compatibility may change; verify important information in the official LMS.")
+            Section("Permissions & Status") {
+                Text("Pipo is an independent LMS utility. Verify important information in the official LMS.")
                     .foregroundStyle(.secondary)
                 Label("Keychain — required to store the LMS token and cache encryption key securely.", systemImage: "key")
                 Label("Notifications — optional; requested after a successful sync when enabled. Declining disables deadline and LMS alerts.", systemImage: "bell")
@@ -339,7 +336,6 @@ struct PipoSettingsCenterView: View {
                 }
                 Button("Terms of Use", systemImage: "doc.text") { configuration.openURL(PipoLegal.termsURL) }
                 Button("Privacy Policy", systemImage: "hand.raised") { configuration.openURL(PipoLegal.privacyURL) }
-                LabeledContent("Notice acknowledged", value: PipoLegal.isPreReleaseAcknowledged() ? "Yes" : "No")
                 LabeledContent("Legal acknowledged", value: PipoLegal.isAcknowledged() ? "Yes" : "No")
             }
             Section("Licenses") {
@@ -470,10 +466,6 @@ struct PipoSettingsCenterView: View {
     }
 
     private func submitPassword() {
-        guard acceptedPreReleaseVersion == PipoLegal.preReleaseVersion else {
-            validationMessage = "Continue through the Pre-Release & Permissions notice first."
-            return
-        }
         guard acceptedLegalVersion == PipoLegal.currentVersion else {
             validationMessage = "Acknowledge the Terms of Use and Privacy Policy to continue."
             return
@@ -488,10 +480,6 @@ struct PipoSettingsCenterView: View {
     }
 
     private func submitToken() {
-        guard acceptedPreReleaseVersion == PipoLegal.preReleaseVersion else {
-            validationMessage = "Continue through the Pre-Release & Permissions notice first."
-            return
-        }
         guard acceptedLegalVersion == PipoLegal.currentVersion else {
             validationMessage = "Acknowledge the Terms of Use and Privacy Policy to continue."
             return

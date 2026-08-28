@@ -41,9 +41,12 @@ async fn main() {
             match serde_json::from_slice::<Request>(&line) {
                 Ok(request) => {
                     let id = request.id.clone();
-                    match tokio::time::timeout(Duration::from_secs(60), handle(request, &client))
-                        .await
-                    {
+                    let timeout = match &request.method {
+                        pipo_core::Method::RefreshDashboard => Duration::from_secs(45),
+                        pipo_core::Method::LoadCourse => Duration::from_secs(30),
+                        _ => Duration::from_secs(25),
+                    };
+                    match tokio::time::timeout(timeout, handle(request, &client)).await {
                         Ok(response) => response,
                         Err(_) => Response {
                             version: PROTOCOL_VERSION,

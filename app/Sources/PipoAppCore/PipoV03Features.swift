@@ -12,7 +12,14 @@ public struct PipoLocalState: Codable, Equatable, Sendable {
     public init() {}
 }
 
-public actor EncryptedLocalStateStore {
+public protocol AccountScopedLocalStateStore: Sendable {
+    func loadLocalState(accountID: String) async throws -> PipoLocalState
+    func saveLocalState(_ state: PipoLocalState, accountID: String) async throws
+    func deleteLocalState(accountID: String) async throws
+    func deleteAllLocalState() async throws
+}
+
+public actor EncryptedLocalStateStore: AccountScopedLocalStateStore {
     private let database: DatabaseQueue
     private let key: SymmetricKey
 
@@ -22,6 +29,7 @@ public actor EncryptedLocalStateStore {
         key = SymmetricKey(data: keyData)
         try database.write { db in
             try db.execute(sql: "CREATE TABLE IF NOT EXISTS pipo_local_state (id INTEGER PRIMARY KEY CHECK (id = 1), payload BLOB NOT NULL)")
+            try db.execute(sql: "CREATE TABLE IF NOT EXISTS pipo_local_state_accounts (account_id TEXT PRIMARY KEY NOT NULL, payload BLOB NOT NULL)")
         }
     }
 
@@ -53,6 +61,29 @@ public actor EncryptedLocalStateStore {
 
     public func delete() throws {
         try database.write { db in try db.execute(sql: "DELETE FROM pipo_local_state") }
+    }
+
+    public func loadLocalState(accountID: String) throws -> PipoLocalState {
+        let encrypted: Data? = try database.read { db in try Data.fetchOne(db, sql: "SELECT payload FROM pipo_local_state_accounts WHERE account_id = ?", arguments: [accountID]) }
+        guard let encrypted else { return PipoLocalState() }
+        do { return try JSONDecoder().decode(PipoLocalState.self, from: AES.GCM.open(AES.GCM.SealedBox(combined: encrypted), using: key)) }
+        catch { try deleteLocalState(accountID: accountID); return PipoLocalState() }
+    }
+
+    public func saveLocalState(_ state: PipoLocalState, accountID: String) throws {
+        let encrypted = try AES.GCM.seal(JSONEncoder().encode(state), using: key).combined.unwrap(or: PipoCoreError.operationFailed("State encryption failed"))
+        try database.write { db in try db.execute(sql: "INSERT INTO pipo_local_state_accounts (account_id, payload) VALUES (?, ?) ON CONFLICT(account_id) DO UPDATE SET payload = excluded.payload", arguments: [accountID, encrypted]) }
+    }
+
+    public func deleteLocalState(accountID: String) throws {
+        try database.write { db in try db.execute(sql: "DELETE FROM pipo_local_state_accounts WHERE account_id = ?", arguments: [accountID]) }
+    }
+
+    public func deleteAllLocalState() throws {
+        try database.write { db in
+            try db.execute(sql: "DELETE FROM pipo_local_state_accounts")
+            try db.execute(sql: "DELETE FROM pipo_local_state")
+        }
     }
 }
 
@@ -208,8 +239,13 @@ public struct PipoDiagnostics: Codable, Equatable, Sendable {
     public let sectionTimestamps: [String: String]
     public let sectionOutcomes: [String: String]
     public let lmsCallCount: Int
+    public let retryCount: Int
+    public let protocolVersion: Int
+    public let truncatedSections: [String]
+    public let errorCodes: [String: String]
     public let durationMilliseconds: Int?
     public let dataSource: String?
+    public let coalesced: Bool?
     public let timeoutCount: Int
 
     public init(snapshot: DashboardSnapshot, refreshMetrics: PipoRefreshMetrics? = nil, appVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev", macOSVersion: String = ProcessInfo.processInfo.operatingSystemVersionString) {
@@ -221,8 +257,13 @@ public struct PipoDiagnostics: Codable, Equatable, Sendable {
         sectionTimestamps = snapshot.sectionTimestamps
         sectionOutcomes = snapshot.sectionResults.mapValues { $0.status.rawValue }
         lmsCallCount = snapshot.syncDiagnostics.lmsCallCount
+        retryCount = snapshot.syncDiagnostics.retryCount
+        protocolVersion = snapshot.syncDiagnostics.protocolVersion
+        truncatedSections = snapshot.sectionResults.filter { $0.value.truncated == true }.keys.sorted()
+        errorCodes = snapshot.sectionResults.compactMapValues(\.errorCode)
         durationMilliseconds = refreshMetrics?.durationMilliseconds
         dataSource = refreshMetrics?.source.rawValue
+        coalesced = refreshMetrics?.coalesced
         timeoutCount = snapshot.sectionResults.values.filter { $0.error?.localizedCaseInsensitiveContains("timed out") == true }.count
     }
 

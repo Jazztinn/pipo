@@ -8,6 +8,7 @@ import SwiftUI
 final class PipoMenuBarController: NSObject, NSWindowDelegate {
     private let model: PipoModel
     private let installUpdate: (@MainActor () -> Void)?
+    private let updatePresentation: PipoUpdatePresentationModel
     private let menuHostLayout = PipoMenuHostLayout()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let panel = PipoMenuPanel(
@@ -27,9 +28,14 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
 
     private enum Visibility { case hidden, showing, shown, hiding }
 
-    init(model: PipoModel, installUpdate: (@MainActor () -> Void)?) {
+    init(
+        model: PipoModel,
+        installUpdate: (@MainActor () -> Void)?,
+        updatePresentation: PipoUpdatePresentationModel
+    ) {
         self.model = model
         self.installUpdate = installUpdate
+        self.updatePresentation = updatePresentation
         super.init()
         configureStatusItem()
         configurePanel()
@@ -67,7 +73,11 @@ final class PipoMenuBarController: NSObject, NSWindowDelegate {
 
         let root = PipoRootView(
             model: model,
-            configuration: PipoUIConfiguration(model: model, installUpdate: installUpdate),
+            configuration: PipoUIConfiguration(
+                model: model,
+                installUpdate: installUpdate,
+                updatePresentation: updatePresentation
+            ),
             hostMode: .menuBar,
             menuHostLayout: menuHostLayout,
             onMenuInspectorVisibilityChanged: { [weak self] visible in

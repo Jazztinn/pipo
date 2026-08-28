@@ -17,9 +17,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.4.18</string>
+    <string>0.5.0</string>
     <key>CFBundleVersion</key>
-    <string>26</string>
+    <string>27</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHumanReadableCopyright</key>
@@ -27,14 +27,12 @@
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>Pipo adds selected LMS deadlines and events to your calendar.</string>
     <key>SUEnableAutomaticChecks</key>
-    <true/>
+    <false/>
     <key>SUFeedURL</key>
     <string>https://raw.githubusercontent.com/Jazztinn/pipo/main/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>8kvbucAz83Uny7Xwxg6FNxEQZdoaHY0RltHf7u1tAC4=</string>
     <key>SUAllowsAutomaticUpdates</key>
     <true/>
-    <key>SUScheduledCheckInterval</key>
-    <integer>86400</integer>
 </dict>
 </plist>

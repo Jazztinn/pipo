@@ -9,7 +9,7 @@
   const initialGreeting = document.getElementById('today-greeting');
   if (initialGreeting) initialGreeting.textContent = documentGreeting;
   const requests = new Map();
-  const allowed = new Set(['ui.ready', 'refresh', 'refreshSection', 'selectTab', 'loadCourse', 'updateSettings', 'updateChannel', 'markSeen', 'undoSeen', 'snooze', 'openDestination', 'copyDetails', 'addToCalendar', 'requestCalendarAccess', 'pinCourse', 'unpinCourse', 'hideCourse', 'restoreCourse', 'clearCache', 'checkForUpdates', 'exportDiagnostics', 'retrySecureStorage', 'setInspectorVisible', 'dismissMenu', 'signOut']);
+  const allowed = new Set(['ui.ready', 'refresh', 'refreshSection', 'selectTab', 'loadCourse', 'updateSettings', 'updateChannel', 'markSeen', 'undoSeen', 'snooze', 'openDestination', 'copyDetails', 'addToCalendar', 'requestCalendarAccess', 'pinCourse', 'unpinCourse', 'hideCourse', 'restoreCourse', 'clearCache', 'checkForUpdates', 'viewUpdate', 'dismissUpdate', 'dismissWhatsNew', 'exportDiagnostics', 'retrySecureStorage', 'setInspectorVisible', 'dismissMenu', 'signOut']);
   let currentState = null;
   let revision = 0;
   let selectedItem = null;
@@ -27,6 +27,7 @@
   };
   const sectionSignatures = new Map();
   let todayShellReady = false;
+  let whatsNewBuildShown = null;
   const el = (tag, className, value) => { const node = document.createElement(tag); if (className) node.className = className; if (value != null) node.textContent = String(value); return node; };
   const meaningful = value => value != null && value !== false && !['', '-', '—', 'null', 'undefined', 'not supplied'].includes(String(value).trim().toLowerCase());
   const field = (value, fallback = '—') => meaningful(value) ? value : fallback;
@@ -73,7 +74,7 @@
     catch (_) { setActionPending(trigger, false); showToast('Pipo could not complete that action.', source); return null; }
     const requestID = typeof nativeID === 'string' && nativeID ? nativeID : generatedID;
     const sourcePanel = source === 'inspector' ? document.getElementById('inspector-panel') : document.getElementById('main-panel');
-    const timeoutMilliseconds = ['refresh', 'refreshSection', 'loadCourse'].includes(action) ? 70000 : 15000;
+    const timeoutMilliseconds = ['refresh', 'refreshSection', 'loadCourse'].includes(action) ? 90000 : 15000;
     const timeoutID = window.setTimeout(() => {
       const pending = requests.get(requestID); if (!pending) return;
       requests.delete(requestID); setActionPending(pending.trigger, false);
@@ -260,7 +261,7 @@
     const warning = Array.isArray(detail?.failures) && detail.failures.length ? 'Some course sections are unavailable.' : '';
     openItemInspector('course', { ...selectedItem, ...course, assignments: detail?.assignments || [], grades: detail?.grades || [], detail: warning }, true);
   }
-  function closeInspectorSafe() {
+  function closeInspectorSafe(notifyNative = true) {
     const inspector = document.getElementById('inspector-panel');
     const viewport = document.getElementById('inspector-viewport');
     if (!inspector || inspector.classList.contains('hidden')) return false;
@@ -287,7 +288,7 @@
       const main = document.getElementById('main-panel');
       main?.removeAttribute('inert'); main?.removeAttribute('aria-hidden');
       inspectorTrigger?.focus?.({ preventScroll: true }); inspectorTrigger = null;
-      request('setInspectorVisible', { visible: false });
+      if (notifyNative) request('setInspectorVisible', { visible: false });
     };
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) finishClose();
     else {
@@ -353,7 +354,7 @@
     const today = document.getElementById('view-today'); const courses = document.getElementById('view-courses');
     if (today && !todayShellReady) { const greeting = el('h2', 'text-sm font-bold text-white tracking-tight'); greeting.id = 'today-greeting'; const notices = el('div', 'space-y-2'); notices.id = 'today-notices'; const sections = el('div', 'space-y-3'); sections.id = 'today-sections'; today.replaceChildren(greeting, notices, sections); todayShellReady = true; }
     const greeting = document.getElementById('today-greeting'); if (greeting) greeting.textContent = `${documentGreeting}${state.studentName ? `, ${state.studentName}` : ''}`;
-    const notices = document.getElementById('today-notices'); if (notices) { const nodes = []; if (state.phase === 'failed') { const card = el('div', 'mac-card rounded-xl p-2.5 text-xs text-rose-400', meaningful(state.errorMessage) ? state.errorMessage : 'Pipo could not load your LMS.'); const retry = el('button', 'mt-2 block font-semibold', 'Retry'); retry.type = 'button'; retry.dataset.action = 'refresh'; card.append(retry); nodes.push(card); } else if (state.phase === 'offline') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Showing saved LMS data. Some private details require a live connection.')); else if (state.phase === 'loading' || state.phase === 'authenticating') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 animate-pulse', 'Connecting to your LMS…')); if (state.failures?.length) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections could not refresh.')); notices.replaceChildren(...nodes); }
+    const notices = document.getElementById('today-notices'); if (notices) { const nodes = []; if (state.phase === 'failed') { const card = el('div', 'mac-card rounded-xl p-2.5 text-xs text-rose-400', meaningful(state.errorMessage) ? state.errorMessage : 'Pipo could not load your LMS.'); const retry = el('button', 'mt-2 block font-semibold', 'Retry'); retry.type = 'button'; retry.dataset.action = 'refresh'; card.append(retry); nodes.push(card); } else if (state.phase === 'offline') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Showing saved LMS data. Some private details require a live connection.')); else if (state.phase === 'loading' || state.phase === 'authenticating') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 animate-pulse', 'Connecting to your LMS…')); if (state.failures?.length) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections could not refresh.')); if (Object.values(state.sectionStatuses || {}).some(section => section?.truncated)) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections are limited this refresh. More items remain available in the LMS.')); notices.replaceChildren(...nodes); }
     const consumed = new Set(); const consume = items => uniqueItems(items).filter(item => { const key = String(item?.entityKey || item?.id || ''); if (key && consumed.has(key)) return false; if (key) consumed.add(key); return true; });
     const definitions = [
       ['Up next', 'nextUp', consume(safeArray(state.nextUp)), 'activity'], ['Due soon', 'dueSoon', consume(safeArray(state.dueSoon)), 'assignment'],
@@ -373,7 +374,31 @@
     const sync = document.getElementById('sync-status'); if (sync) sync.textContent = statusText;
     const syncDot = document.getElementById('sync-dot'); if (syncDot) syncDot.dataset.phase = phase === 'ready' && state.failures?.length ? 'offline' : phase;
     const syncButton = document.getElementById('sync-button'); if (syncButton) { syncButton.setAttribute('aria-label', `${statusText}. Refresh Pipo`); syncButton.setAttribute('aria-busy', String(phase === 'loading' || phase === 'authenticating')); }
-    syncSettings(state); syncCourseFilters(state); syncLocalCourses(state); applyFilters();
+    renderUpdatePresentation(state); syncSettings(state); syncCourseFilters(state); syncLocalCourses(state); applyFilters();
+  }
+  function renderUpdatePresentation(state) {
+    const notice = state.updateNotice;
+    const strip = document.getElementById('update-notice');
+    if (strip) {
+      const visible = notice && meaningful(notice.version);
+      strip.classList.toggle('hidden', !visible); strip.classList.toggle('flex', Boolean(visible));
+      strip.dataset.severity = notice?.severity === 'critical' ? 'critical' : 'standard';
+      const text = document.getElementById('update-notice-text');
+      const versionMatch = visible ? String(notice.version).match(/^(\d+\.\d+)\.0$/) : null; const displayVersion = versionMatch?.[1] || notice?.version;
+      if (text) text.textContent = visible ? `${notice.severity === 'critical' ? 'Important update: ' : ''}Pipo ${displayVersion} is available.` : '';
+      const icon = document.getElementById('update-notice-icon'); if (icon) icon.className = `fa-solid ${notice?.severity === 'critical' ? 'fa-triangle-exclamation text-amber-300' : 'fa-circle-arrow-up text-rose-400'}`;
+      const dismiss = document.getElementById('dismiss-update'); if (dismiss) dismiss.hidden = notice?.severity === 'critical';
+    }
+    const whatsNew = state.whatsNew;
+    const backdrop = document.getElementById('whats-new-backdrop');
+    const show = whatsNew && Array.isArray(whatsNew.items) && whatsNew.items.length >= 2;
+    if (backdrop) {
+      backdrop.classList.toggle('hidden', !show); backdrop.classList.toggle('flex', Boolean(show)); backdrop.setAttribute('aria-hidden', String(!show));
+      const title = document.getElementById('whats-new-title'); if (title && show) title.textContent = `What’s new in Pipo ${whatsNew.version}`;
+      const list = document.getElementById('whats-new-items'); if (list && show) list.replaceChildren(...whatsNew.items.slice(0, 4).map(item => el('li', '', item)));
+      if (show && whatsNewBuildShown !== whatsNew.build) { whatsNewBuildShown = whatsNew.build; window.setTimeout(() => document.getElementById('dismiss-whats-new')?.focus(), 0); }
+      if (!show) whatsNewBuildShown = null;
+    }
   }
   function syncLocalCourses(state) {
     const container = document.getElementById('settings-courses-state'); if (!container) return;
@@ -446,7 +471,7 @@
       const label = node.textContent.trim().toLowerCase(); let action = null;
       if (label === 'sign out') action = 'signOut'; else if (label.includes('allow calendar')) action = 'requestCalendarAccess'; else if (label.includes('refresh')) action = 'refresh'; else if (label.includes('calendar')) action = 'addToCalendar'; else if (label.includes('copy')) action = 'copyDetails'; else if (label.includes('seen')) action = 'markSeen'; else if (label.includes('snooze')) action = 'snooze'; else if (label.includes('open')) action = 'openDestination'; else if (label.includes('clear')) action = 'clearCache'; else if (label.includes('update')) action = 'checkForUpdates'; else if (label.includes('diagnostic')) action = 'exportDiagnostics';
       if (label.includes('open lms in browser')) node.dataset.lmsRoot = 'true';
-      if (action) node.dataset.action = action;
+      if (action && !node.dataset.action) node.dataset.action = action;
     });
     document.querySelectorAll('[id^="section-"] > button, [data-collapse-target]').forEach(heading => {
       const content = heading.nextElementSibling; if (!content) return; const icon = heading.querySelector('.fa-chevron-up, .fa-chevron-down'); if (content.id) heading.setAttribute('aria-controls', content.id); heading.setAttribute('aria-expanded', 'true'); heading.addEventListener('click', () => { const collapsed = content.hidden = !content.hidden; heading.setAttribute('aria-expanded', String(!collapsed)); icon?.classList.toggle('fa-chevron-up', !collapsed); icon?.classList.toggle('fa-chevron-down', collapsed); });
@@ -472,6 +497,8 @@
     document.addEventListener('keydown', event => { if ((event.key === 'Enter' || event.key === ' ') && !event.repeat) playClickFor(event.target); }, true);
     document.addEventListener('click', event => { const menu = document.getElementById('item-context-menu'); if (!event.target.closest('#item-context-menu')) dismissMenu(); if (!event.target.closest('#filter-popover') && !event.target.closest('#filter-toggle')) dismissFilter(); const actionButton = event.target.closest('[data-action]'); if (!actionButton) return; const rawAction = actionButton.dataset.action; if (rawAction.startsWith('selectTab:')) return; if (rawAction === 'closeInspector') return closeInspectorSafe(); if (rawAction === 'clearCache' && !window.confirm('Clear the saved dashboard? Pipo will fetch it again on refresh.')) return; const itemID = selectedType === 'course' ? null : selectedItem?.id; const courseID = actionButton.dataset.courseId || (selectedType === 'course' ? (selectedItem?.id || selectedItem?.courseID) : null); const payload = actionButton.dataset.lmsRoot === 'true' ? { lmsRoot: true } : rawAction === 'refreshSection' ? { section: actionButton.dataset.section } : rawAction === 'loadCourse' ? { courseID, openToken: inspectorOpenToken } : courseID ? { courseID } : itemID ? { itemID } : {}; const source = actionButton.closest('#inspector-panel') ? 'inspector' : 'main'; request(rawAction, payload, source, actionButton); dismissMenu(); event.preventDefault(); event.stopImmediatePropagation(); }, true);
     document.addEventListener('keydown', event => {
+      const whatsNew = document.getElementById('whats-new-backdrop');
+      if (event.key === 'Tab' && whatsNew && !whatsNew.classList.contains('hidden')) { event.preventDefault(); document.getElementById('dismiss-whats-new')?.focus(); return; }
       if (event.key === 'Escape') { event.preventDefault(); if (dismissMenu()) return; if (dismissFilter()) { document.getElementById('filter-toggle')?.focus(); return; } if (closeInspectorSafe()) return; request('dismissMenu'); return; }
       const inspector = document.getElementById('inspector-panel');
       if (event.key !== 'Tab' || !window.matchMedia('(max-width: 735px)').matches || !inspector || inspector.classList.contains('hidden')) return;
@@ -481,6 +508,11 @@
     });
     window.addEventListener('resize', syncInspectorModality);
     window.addEventListener('unhandledrejection', event => { event.preventDefault(); showToast('Pipo could not complete that action.'); window.dispatchEvent(new CustomEvent('pipo:error', { detail: event.reason })); });
+    window.addEventListener('pipo-reset-session', () => {
+      requests.forEach(pending => { window.clearTimeout(pending.timeoutID); setActionPending(pending.trigger, false); }); requests.clear();
+      dismissMenu(); dismissFilter(); closeInspectorSafe(false);
+      document.getElementById('toast')?.classList.add('opacity-0', 'translate-y-4');
+    });
   }
   function initializeClickAudio() {
     const source = document.getElementById('pipo-click');

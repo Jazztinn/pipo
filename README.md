@@ -52,9 +52,8 @@ features or writes changes to Moodle.
 3. Launch Pipo and sign in with your LPU Cavite LMS account.
 4. Use the flag in the menu bar to open the dashboard.
 
-> [!NOTE]
-> Current builds are distributed without Apple notarization. macOS may require
-> a manual approval in **System Settings → Privacy & Security** on first launch.
+Official release artifacts are universal, Developer ID signed, notarized, and
+stapled before publication.
 
 After installation, use **Settings → Updates → Check for updates**. Pipo can
 download approved releases without requiring another DMG installation.

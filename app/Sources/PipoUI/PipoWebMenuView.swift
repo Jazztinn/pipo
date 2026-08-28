@@ -45,6 +45,10 @@ struct PipoWebMenuCourseV2: Codable, Sendable {
 struct PipoWebMenuSectionStatusV2: Codable, Sendable {
     let status: String
     let dataSource: String
+    let truncated: Bool
+    let availableCount: Int?
+    let errorCode: String?
+    let retryAfterSeconds: Int?
 }
 
 struct PipoWebMenuStateV2: Codable, Sendable {
@@ -69,6 +73,8 @@ struct PipoWebMenuStateV2: Codable, Sendable {
     let calendarAuthorization: String
     let appVersion: String
     let updateChannel: String
+    let updateNotice: PipoUpdateNotice?
+    let whatsNew: PipoWhatsNew?
 
     struct Settings: Codable, Sendable {
         let refreshMinutes: Int
@@ -237,12 +243,15 @@ struct PipoWebMenuView: NSViewRepresentable {
         private var initialRefreshTask: Task<Void, Never>?
         private var selectedTab: String
         private var windowObserver: NSObjectProtocol?
+        private var bridgeReloadAttempted = false
 
         init(model: PipoModel, configuration: PipoUIConfiguration, hostMode: PipoWebMenuHostMode, onSignOut: @escaping () -> Void, onDismissMenu: @escaping () -> Void, onInspectorVisibilityChanged: @escaping (Bool) -> Void) {
             self.model = model
             self.configuration = configuration
             self.hostMode = hostMode
-            self.selectedTab = hostMode == .window ? "settings" : "today"
+            self.selectedTab = hostMode == .window
+                ? "settings"
+                : (model.selectedTab == .dashboard ? "today" : model.selectedTab.rawValue)
             self.onSignOut = onSignOut
             self.onDismissMenu = onDismissMenu
             self.onInspectorVisibilityChanged = onInspectorVisibilityChanged
@@ -274,10 +283,8 @@ struct PipoWebMenuView: NSViewRepresentable {
             windowObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self, weak view] _ in
                 guard let self, let view else { return }
                 Task { @MainActor in
-                    self.ready = false
-                    self.selectedTab = "today"
                     self.onInspectorVisibilityChanged(false)
-                    self.loadMenu(in: view)
+                    self.dispatchReset(in: view)
                 }
             }
         }
@@ -321,6 +328,7 @@ struct PipoWebMenuView: NSViewRepresentable {
                 case "selectTab":
                     guard let raw = payload["tab"]?.stringValue, let tab = PipoAppCore.PipoTab(rawValue: raw == "today" ? "dashboard" : raw) else { throw BridgeError.invalid }
                     selectedTab = tab == .dashboard ? "today" : tab.rawValue
+                    model.selectedTab = tab
                 case "loadCourse":
                     guard let courseID = validCourseID(payload) else { throw BridgeError.invalid }
                     responseTargetID = String(courseID)
@@ -363,6 +371,9 @@ struct PipoWebMenuView: NSViewRepresentable {
                     NotificationCenter.default.post(name: Notification.Name("com.jazztinn.pipo.update-channel-changed"), object: nil)
                 case "clearCache": await model.clearCache()
                 case "checkForUpdates": guard let action = configuration.installUpdate else { throw BridgeError.unsupported }; action()
+                case "viewUpdate": guard let action = configuration.viewUpdate else { throw BridgeError.unsupported }; action()
+                case "dismissUpdate": configuration.dismissUpdate()
+                case "dismissWhatsNew": configuration.dismissWhatsNew()
                 case "exportDiagnostics": guard let action = configuration.exportDiagnostics else { throw BridgeError.unsupported }; action()
                 case "retrySecureStorage": _ = await model.retrySecureStorage()
                 case "setInspectorVisible":
@@ -430,6 +441,8 @@ struct PipoWebMenuView: NSViewRepresentable {
                 _ = model.settings
                 _ = model.localState
                 _ = model.secureStorageStatus
+                _ = configuration.updatePresentation?.updateNotice
+                _ = configuration.updatePresentation?.whatsNew
             } onChange: { [weak self] in
                 Task { @MainActor in
                     guard let self, !self.isClosed else { return }
@@ -512,7 +525,9 @@ struct PipoWebMenuView: NSViewRepresentable {
                 ),
                 secureStorage: String(describing: model.secureStorageStatus), calendarAuthorization: model.calendarAuthorizationDescription,
                 appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development",
-                updateChannel: UserDefaults.standard.string(forKey: "pipo.updates.channel") ?? "stable"
+                updateChannel: UserDefaults.standard.string(forKey: "pipo.updates.channel") ?? "stable",
+                updateNotice: configuration.updatePresentation?.updateNotice,
+                whatsNew: configuration.updatePresentation?.whatsNew
             )
         }
 
@@ -531,7 +546,14 @@ struct PipoWebMenuView: NSViewRepresentable {
                 let results = (resultKeys[key] ?? [key]).compactMap { snapshot?.result(for: $0).status }
                 let resultStatus: String? = results.contains(.failed) ? "failed" : results.contains(.partial) ? "partial" : results.allSatisfy({ $0 == .unsupported }) && !results.isEmpty ? "unsupported" : nil
                 let status = !supported ? "unsupported" : loading ? "loading" : failed ? "failed" : resultStatus == "failed" && count > 0 ? "partial" : resultStatus ?? (count == 0 ? "empty" : "ready")
-                return (key, PipoWebMenuSectionStatusV2(status: status, dataSource: source))
+                return (key, PipoWebMenuSectionStatusV2(
+                    status: status,
+                    dataSource: source,
+                    truncated: (resultKeys[key] ?? [key]).contains { snapshot?.result(for: $0).truncated == true },
+                    availableCount: (resultKeys[key] ?? [key]).compactMap { snapshot?.result(for: $0).availableCount }.max(),
+                    errorCode: (resultKeys[key] ?? [key]).compactMap { snapshot?.result(for: $0).errorCode }.first,
+                    retryAfterSeconds: (resultKeys[key] ?? [key]).compactMap { snapshot?.result(for: $0).retryAfterSeconds }.max()
+                ))
             })
         }
 
@@ -542,7 +564,28 @@ struct PipoWebMenuView: NSViewRepresentable {
 
         private func dispatch<Value: Encodable>(event: String, value: Value) {
             guard let view = webView, let data = try? JSONEncoder().encode(value), let json = String(data: data, encoding: .utf8) else { return }
-            view.evaluateJavaScript("window.dispatchEvent(new CustomEvent('\(event)', { detail: \(json) }));")
+            view.evaluateJavaScript("window.dispatchEvent(new CustomEvent('\(event)', { detail: \(json) }));") { [weak self, weak view] _, error in
+                guard let self, let view, error != nil, !self.bridgeReloadAttempted, !self.isClosed else { return }
+                self.bridgeReloadAttempted = true
+                self.loadMenu(in: view)
+            }
+        }
+
+        private func dispatchReset(in view: WKWebView) {
+            view.evaluateJavaScript("window.dispatchEvent(new CustomEvent('pipo-reset-session'));") { [weak self] _, error in
+                guard error != nil, let self else { return }
+                self.bridgeReloadAttempted = true
+                self.loadMenu(in: view)
+            }
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            bridgeReloadAttempted = true
+            loadMenu(in: webView)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            bridgeReloadAttempted = false
         }
 
         private static func phaseDescription(_ phase: PipoPhase) -> (name: String, error: String?) {

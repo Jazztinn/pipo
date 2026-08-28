@@ -32,16 +32,44 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           toolchain: stable
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Validate release metadata
         env:
           VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' app/Resources/Info.plist)" = "$VERSION"
+          test "$(jq -r .version app/Sources/PipoUI/Resources/WhatsNew.json)" = "$VERSION"
+          test "$(jq -r .build app/Sources/PipoUI/Resources/WhatsNew.json)" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' app/Resources/Info.plist)"
+          test "$(jq -r .channel app/Sources/PipoUI/Resources/WhatsNew.json)" = "$CHANNEL"
+          test "$(jq '.items | length >= 2 and length <= 4' app/Sources/PipoUI/Resources/WhatsNew.json)" = true
+          jq -e '.importance == "standard" or .importance == "critical"' app/Sources/PipoUI/Resources/WhatsNew.json >/dev/null
           test "$(git tag -l "v$VERSION")" = ""
 
-      - name: Build ad-hoc signed app
-        run: scripts/build-local-beta.sh
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERT_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          test -n "$CERTIFICATE_P12"
+          KEYCHAIN="$RUNNER_TEMP/pipo-signing.keychain-db"
+          CERTIFICATE="$RUNNER_TEMP/pipo-developer-id.p12"
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$CERTIFICATE"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          security import "$CERTIFICATE" -k "$KEYCHAIN" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+
+      - name: Build Developer ID signed universal app
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+        run: |
+          test -n "$CODESIGN_IDENTITY"
+          scripts/build-local-beta.sh
+          REQUIRE_NOTARIZATION=0 scripts/verify-release.sh dist/Pipo.app
 
       - name: Verify app signature
         run: |
@@ -51,7 +79,20 @@ jobs:
       - name: Build installer
         env:
           VERSION: ${{ inputs.version }}
-        run: scripts/build-dmg.sh dist/Pipo.app "dist/Pipo-$VERSION-arm64.dmg"
+        run: scripts/build-dmg.sh dist/Pipo.app "dist/Pipo-$VERSION-universal.dmg"
+
+      - name: Sign, notarize, and staple installer
+        env:
+          VERSION: ${{ inputs.version }}
+          CODESIGN_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          test -n "$NOTARY_KEY_P8"
+          export NOTARY_KEY_FILE="$RUNNER_TEMP/AuthKey_$NOTARY_KEY_ID.p8"
+          printf '%s' "$NOTARY_KEY_P8" | base64 --decode > "$NOTARY_KEY_FILE"
+          scripts/notarize-release.sh "dist/Pipo-$VERSION-universal.dmg"
 
       - name: Download Sparkle tools
         env:
@@ -69,20 +110,34 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           UPDATES="$RUNNER_TEMP/updates"
+          NOTES="$RUNNER_TEMP/release-notes.md"
           FEED=appcast.xml
           CHANNEL_ARGS=()
+          RELEASE_ARGS=(--embed-release-notes)
+          IMPORTANCE=$(jq -r .importance app/Sources/PipoUI/Resources/WhatsNew.json)
           if [ "$CHANNEL" = beta ]; then
             FEED=appcast-beta.xml
             CHANNEL_ARGS=(--channel beta)
+          elif [ "$IMPORTANCE" = standard ]; then
+            RELEASE_ARGS+=(--phased-rollout-interval 86400)
+          fi
+          if [ "$IMPORTANCE" = critical ]; then
+            RELEASE_ARGS+=(--critical-update-version "")
           fi
           mkdir "$UPDATES"
-          cp "dist/Pipo-$VERSION-arm64.dmg" "$UPDATES/"
+          cp "dist/Pipo-$VERSION-universal.dmg" "$UPDATES/"
+          {
+            printf '# Pipo %s\n\n' "$VERSION"
+            jq -r '.items[] | "- " + .' app/Sources/PipoUI/Resources/WhatsNew.json
+          } > "$NOTES"
+          cp "$NOTES" "$UPDATES/Pipo-$VERSION-universal.md"
           printf '%s' "$SPARKLE_PRIVATE_KEY" | "$RUNNER_TEMP/sparkle/bin/generate_appcast" \
             --ed-key-file - \
             --download-url-prefix "https://github.com/Jazztinn/pipo/releases/download/v$VERSION/" \
             --link "https://github.com/Jazztinn/pipo" \
             --maximum-deltas 0 \
             "${CHANNEL_ARGS[@]}" \
+            "${RELEASE_ARGS[@]}" \
             -o "$FEED" \
             "$UPDATES"
 
@@ -98,9 +153,13 @@ jobs:
             RELEASE_ARGS=(--prerelease)
             FEED=appcast-beta.xml
           fi
-          gh release create "v$VERSION" "dist/Pipo-$VERSION-arm64.dmg" \
+          {
+            printf '# Pipo %s\n\n' "$VERSION"
+            jq -r '.items[] | "- " + .' app/Sources/PipoUI/Resources/WhatsNew.json
+          } > "$RUNNER_TEMP/release-notes.md"
+          gh release create "v$VERSION" "dist/Pipo-$VERSION-universal.dmg" \
             --title "Pipo $VERSION" \
-            --generate-notes \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             "${RELEASE_ARGS[@]}"
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com

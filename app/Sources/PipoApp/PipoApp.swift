@@ -14,7 +14,8 @@ struct PipoApp: App {
                 model: appDelegate.model,
                 configuration: PipoUIConfiguration(
                     model: appDelegate.model,
-                    installUpdate: appDelegate.installUpdate
+                    installUpdate: appDelegate.installUpdate,
+                    updatePresentation: appDelegate.updatePresentation
                 ),
                 hostMode: .window
             )
@@ -43,15 +44,25 @@ private struct PipoCommands: Commands {
 @MainActor
 final class PipoUpdater: NSObject, SPUUpdaterDelegate {
     let isConfigured: Bool
+    let presentation: PipoUpdatePresentationModel
     private lazy var controller = SPUStandardUpdaterController(
         startingUpdater: isConfigured,
         updaterDelegate: self,
         userDriverDelegate: nil
     )
     private var channelObserver: NSObjectProtocol?
+    private var probeTask: Task<Void, Never>?
+    private let defaults: UserDefaults
+    private static let lastProbeKey = "pipo.updates.last-information-probe"
 
-    init(bundle: Bundle = .main) {
+    init(
+        bundle: Bundle = .main,
+        defaults: UserDefaults = .standard,
+        presentation: PipoUpdatePresentationModel = PipoUpdatePresentationModel()
+    ) {
         isConfigured = !(bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String ?? "").isEmpty
+        self.defaults = defaults
+        self.presentation = presentation
         super.init()
         _ = controller
         channelObserver = NotificationCenter.default.addObserver(
@@ -59,13 +70,64 @@ final class PipoUpdater: NSObject, SPUUpdaterDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.controller.updater.resetUpdateCycleAfterShortDelay() }
+            Task { @MainActor in
+                guard let self else { return }
+                self.presentation.resetForChannelChange()
+                self.defaults.removeObject(forKey: Self.lastProbeKey)
+                self.controller.updater.resetUpdateCycleAfterShortDelay()
+            }
         }
+    }
+
+    deinit {
+        probeTask?.cancel()
+        if let channelObserver { NotificationCenter.default.removeObserver(channelObserver) }
     }
 
     func checkForUpdates() {
         guard isConfigured else { return }
         controller.checkForUpdates(nil)
+    }
+
+    func start() {
+        guard isConfigured, probeTask == nil else { return }
+        probeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self?.probeIfDue()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(PipoUpdateProbePolicy.interval))
+                guard !Task.isCancelled else { return }
+                self?.probeIfDue()
+            }
+        }
+    }
+
+    func stop() {
+        probeTask?.cancel()
+        probeTask = nil
+    }
+
+    private func probeIfDue(now: Date = .now) {
+        guard controller.updater.canCheckForUpdates else { return }
+        guard PipoUpdateProbePolicy.isDue(
+            lastProbe: defaults.object(forKey: Self.lastProbeKey) as? Date,
+            now: now
+        ) else { return }
+        defaults.set(now, forKey: Self.lastProbeKey)
+        controller.updater.checkForUpdateInformation()
+    }
+
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        presentation.presentUpdate(
+            version: item.displayVersionString,
+            build: item.versionString,
+            critical: item.isCriticalUpdate
+        )
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        presentation.clearUpdateNotice()
     }
 
     func feedURLString(for updater: SPUUpdater) -> String? {
@@ -86,14 +148,22 @@ final class PipoAppDelegate: NSObject, NSApplicationDelegate {
     let updater = PipoUpdater()
     private var menuBarController: PipoMenuBarController?
     private var didStartModel = false
+    private var isStopping = false
 
     var installUpdate: (@MainActor () -> Void)? {
         updater.isConfigured ? updater.checkForUpdates : nil
     }
 
+    var updatePresentation: PipoUpdatePresentationModel { updater.presentation }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        menuBarController = PipoMenuBarController(model: model, installUpdate: installUpdate)
+        menuBarController = PipoMenuBarController(
+            model: model,
+            installUpdate: installUpdate,
+            updatePresentation: updatePresentation
+        )
+        updater.start()
         guard !didStartModel else { return }
         didStartModel = true
         Task { await model.start() }
@@ -107,5 +177,16 @@ final class PipoAppDelegate: NSObject, NSApplicationDelegate {
             window.makeKeyAndOrderFront(nil)
         }
         return true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !isStopping else { return .terminateLater }
+        isStopping = true
+        updater.stop()
+        Task {
+            await model.stop()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }

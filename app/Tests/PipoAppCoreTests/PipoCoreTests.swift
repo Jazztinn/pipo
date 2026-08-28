@@ -158,7 +158,7 @@ import Testing
 
 @Test func sidecarRejectsMismatchedResponseIdentity() throws {
     let request = SidecarRequest(method: "resolve_destination", params: ["destination": .string("/my/")])
-    #expect(request.version == 3)
+    #expect(request.version == 4)
     let data = Data("{\"version\":1,\"id\":\"different\",\"result\":{\"url\":\"https://lms.lpucavite.edu.ph/my/\"}}".utf8)
     let response = try JSONDecoder().decode(SidecarResponse.self, from: data)
     #expect(throws: PipoCoreError.invalidResponse) {
@@ -166,11 +166,12 @@ import Testing
     }
 }
 
-@Test func sidecarReadsShortPipeResponsesWithoutWaitingForBufferCapacity() async throws {
+@Test func sidecarRequiresHelloCompatibilityResponse() async throws {
     let transport = PipoCoreProcessTransport(executableURL: URL(fileURLWithPath: "/bin/cat"))
     let request = SidecarRequest(method: "probe", params: [:])
-    let response = try await transport.send(request)
-    #expect(response.id == request.id)
+    await #expect(throws: PipoCoreError.self) {
+        _ = try await transport.send(request)
+    }
     await transport.shutdown()
 }
 
@@ -359,6 +360,30 @@ import Testing
 }
 
 @MainActor
+@Test func signOutClearsVisibleStateBeforeFailedCleanupAndLeavesTombstone() async {
+    let tombstone = "pipo.session.sign-out-cleanup-pending"
+    let suiteName = "PipoSignOutTombstoneTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let transport = SnapshotTransport(snapshot: sampleSnapshot())
+    let tokenStore = FailingDeleteTokenStore(token: "stored-token")
+    let model = PipoModel(
+        transport: transport,
+        tokenStore: tokenStore,
+        refreshCoordinator: DashboardRefreshCoordinator(transport: transport, cache: InMemoryDashboardCache()),
+        notificationService: NoopNotificationService(),
+        lifecycleDefaults: defaults,
+        urlOpener: { _ in }
+    )
+    await model.refresh()
+    #expect(model.snapshot != nil)
+    await model.signOut()
+    #expect(model.snapshot == nil)
+    #expect(model.phase == .signedOut)
+    #expect(defaults.bool(forKey: tombstone))
+}
+
+@MainActor
 @Test func repeatedRefreshesReadKeychainOncePerLaunch() async {
     let tokenStore = TestTokenStore(token: "stored-token")
     let cache = InMemoryDashboardCache(snapshot: sampleSnapshot())
@@ -434,6 +459,37 @@ import Testing
     let migratedCache = try EncryptedDashboardCache(databaseURL: url, keyData: Data(repeating: 2, count: 32))
     #expect(try await migratedCache.load() == nil)
     #expect(try await migratedCache.load() == nil)
+}
+
+@Test func encryptedPersistenceScopesDashboardAndLocalStateByAccount() async throws {
+    let url = temporaryDatabaseURL("account-scoping")
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let store = try EncryptedDashboardCache(databaseURL: url, keyData: Data(repeating: 7, count: 32))
+    let accountA = DashboardSnapshot(generatedAt: "a", siteName: "LPU", studentName: "Alex", sections: DashboardSections(), courses: [])
+    let accountB = DashboardSnapshot(generatedAt: "b", siteName: "LPU", studentName: "Blair", sections: DashboardSections(), courses: [])
+    try await store.save(accountA, accountID: "account-a")
+    try await store.save(accountB, accountID: "account-b")
+    var localA = PipoLocalState(); localA.seenIDs.insert("a-only")
+    var localB = PipoLocalState(); localB.seenIDs.insert("b-only")
+    try await store.saveLocalState(localA, accountID: "account-a")
+    try await store.saveLocalState(localB, accountID: "account-b")
+
+    #expect(try await store.load(accountID: "account-a")?.studentName == "Alex")
+    #expect(try await store.load(accountID: "account-b")?.studentName == "Blair")
+    #expect(try await store.loadLocalState(accountID: "account-a").seenIDs == ["a-only"])
+    #expect(try await store.loadLocalState(accountID: "account-b").seenIDs == ["b-only"])
+}
+
+@Test func legacyDashboardMigratesOnlyIntoVerifiedAccountScope() async throws {
+    let url = temporaryDatabaseURL("legacy-account-migration")
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let store = try EncryptedDashboardCache(databaseURL: url, keyData: Data(repeating: 8, count: 32))
+    try await store.save(sampleSnapshot())
+    #expect(try await store.load(accountID: "verified-account")?.studentName == "Alex")
+    #expect(try await store.load() == nil)
+    #expect(try await store.load(accountID: "verified-account")?.studentName == "Alex")
 }
 
 @Test func encryptedLocalStateDiscardsCiphertextFromPreviousKey() async throws {
@@ -600,7 +656,7 @@ private actor AuthenticationLifecycleTransport: PipoSidecarTransport {
         if request.method == "authenticate_with_password" {
             authenticationCount += 1
             try await Task.sleep(for: .milliseconds(40))
-            return SidecarResponse(version: request.version, id: request.id, result: .object(["token": .string("valid")]), error: nil)
+            return SidecarResponse(version: request.version, id: request.id, result: .object(["token": .string("valid"), "account_id": .number(42)]), error: nil)
         }
         let value = try JSONDecoder().decode(PipoJSONValue.self, from: JSONEncoder().encode(snapshot))
         return SidecarResponse(version: request.version, id: request.id, result: value, error: nil)
@@ -638,6 +694,14 @@ private final class TestTokenStore: PipoTokenStore, @unchecked Sendable {
     func token() throws -> String? { readCount += 1; return value }
     func save(token: String) throws { value = token }
     func deleteToken() throws { value = nil }
+}
+
+private final class FailingDeleteTokenStore: PipoTokenStore, @unchecked Sendable {
+    private var value: String?
+    init(token: String?) { value = token }
+    func token() throws -> String? { value }
+    func save(token: String) throws { value = token }
+    func deleteToken() throws { throw PipoSecureStorageError.unavailable("cleanup failed") }
 }
 
 private final class TestKeychainBackend: PipoKeychainBackend, @unchecked Sendable {

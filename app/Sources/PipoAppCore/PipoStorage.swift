@@ -125,9 +125,16 @@ public struct PipoSystemKeychainBackend: PipoKeychainBackend {
 private struct PipoVaultRecord: Codable, Sendable {
     var token: String?
     var cacheKey: Data
+    var accountID: String?
 }
 
-public final class KeychainSecureVault: PipoTokenStore, @unchecked Sendable {
+public protocol PipoSessionIdentityStore: Sendable {
+    func accountID() throws -> String?
+    func save(accountID: String) throws
+    func saveSession(token: String, accountID: String) throws
+}
+
+public final class KeychainSecureVault: PipoTokenStore, PipoSessionIdentityStore, @unchecked Sendable {
     private let backend: any PipoKeychainBackend
     private let service: String
     private let vaultAccount = "secure-vault-v1"
@@ -161,8 +168,29 @@ public final class KeychainSecureVault: PipoTokenStore, @unchecked Sendable {
         guard !token.isEmpty else { throw PipoCoreError.operationFailed("Token is required.") }
         try withLock {
             let record = try loadRecordLocked(allowRetry: true)
-            let updated = PipoVaultRecord(token: token, cacheKey: record.cacheKey)
+            let updated = PipoVaultRecord(token: token, cacheKey: record.cacheKey, accountID: record.accountID)
             try writeRecordLocked(updated)
+        }
+    }
+
+    public func accountID() throws -> String? {
+        try withRecord { $0.accountID }
+    }
+
+    public func save(accountID: String) throws {
+        guard !accountID.isEmpty else { throw PipoCoreError.invalidResponse }
+        try withLock {
+            var record = try loadRecordLocked(allowRetry: true)
+            record.accountID = accountID
+            try writeRecordLocked(record)
+        }
+    }
+
+    public func saveSession(token: String, accountID: String) throws {
+        guard !token.isEmpty, !accountID.isEmpty else { throw PipoCoreError.invalidResponse }
+        try withLock {
+            let record = try loadRecordLocked(allowRetry: true)
+            try writeRecordLocked(PipoVaultRecord(token: token, cacheKey: record.cacheKey, accountID: accountID))
         }
     }
 
@@ -219,7 +247,7 @@ public final class KeychainSecureVault: PipoTokenStore, @unchecked Sendable {
         let token = try backend.read(service: service, account: legacyTokenAccount).flatMap { String(data: $0, encoding: .utf8) }
         // Legacy cache-key access can trigger an additional Keychain prompt. The old
         // encrypted cache is disposable; generate a fresh vault-owned key instead.
-        return PipoVaultRecord(token: token, cacheKey: try Self.newCacheKey())
+        return PipoVaultRecord(token: token, cacheKey: try Self.newCacheKey(), accountID: nil)
     }
 
     private func writeRecordLocked(_ record: PipoVaultRecord) throws {
@@ -269,7 +297,13 @@ public protocol DashboardCache: Sendable {
     func delete() async throws
 }
 
-public actor EncryptedDashboardCache: DashboardCache {
+public protocol AccountScopedDashboardCache: DashboardCache {
+    func load(accountID: String) async throws -> DashboardSnapshot?
+    func save(_ snapshot: DashboardSnapshot, accountID: String) async throws
+    func delete(accountID: String) async throws
+}
+
+public actor EncryptedDashboardCache: AccountScopedDashboardCache, AccountScopedLocalStateStore {
     private let database: DatabaseQueue
     private let key: SymmetricKey
 
@@ -279,6 +313,9 @@ public actor EncryptedDashboardCache: DashboardCache {
         key = SymmetricKey(data: keyData)
         try database.write { database in
             try database.execute(sql: "CREATE TABLE IF NOT EXISTS pipo_cache (id INTEGER PRIMARY KEY CHECK (id = 1), payload BLOB NOT NULL)")
+            try database.execute(sql: "CREATE TABLE IF NOT EXISTS pipo_cache_accounts (account_id TEXT PRIMARY KEY NOT NULL, payload BLOB NOT NULL)")
+            try database.execute(sql: "CREATE TABLE IF NOT EXISTS pipo_local_state (id INTEGER PRIMARY KEY CHECK (id = 1), payload BLOB NOT NULL)")
+            try database.execute(sql: "CREATE TABLE IF NOT EXISTS pipo_local_state_accounts (account_id TEXT PRIMARY KEY NOT NULL, payload BLOB NOT NULL)")
         }
     }
 
@@ -306,7 +343,83 @@ public actor EncryptedDashboardCache: DashboardCache {
     }
 
     public func delete() throws {
-        try database.write { database in try database.execute(sql: "DELETE FROM pipo_cache") }
+        try database.write { database in
+            try database.execute(sql: "DELETE FROM pipo_cache")
+            try database.execute(sql: "DELETE FROM pipo_cache_accounts")
+        }
+    }
+
+    public func load(accountID: String) throws -> DashboardSnapshot? {
+        var encrypted: Data? = try database.read { db in try Data.fetchOne(db, sql: "SELECT payload FROM pipo_cache_accounts WHERE account_id = ?", arguments: [accountID]) }
+        var isLegacy = false
+        if encrypted == nil {
+            encrypted = try database.read { db in try Data.fetchOne(db, sql: "SELECT payload FROM pipo_cache WHERE id = 1") }
+            isLegacy = encrypted != nil
+        }
+        guard let encrypted else { return nil }
+        do {
+            let box = try AES.GCM.SealedBox(combined: encrypted)
+            let snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: AES.GCM.open(box, using: key)).upgradedToVersionThree().privacyProjected()
+            if isLegacy {
+                try save(snapshot, accountID: accountID)
+                try database.write { db in try db.execute(sql: "DELETE FROM pipo_cache") }
+            }
+            return snapshot
+        } catch {
+            try database.write { db in try db.execute(sql: "DELETE FROM pipo_cache_accounts WHERE account_id = ?", arguments: [accountID]) }
+            return nil
+        }
+    }
+
+    public func save(_ snapshot: DashboardSnapshot, accountID: String) throws {
+        let data = try JSONEncoder().encode(snapshot.privacyProjected())
+        let encrypted = try AES.GCM.seal(data, using: key).combined.unwrap(or: PipoCoreError.operationFailed("Cache encryption failed"))
+        try database.write { db in try db.execute(sql: "INSERT INTO pipo_cache_accounts (account_id, payload) VALUES (?, ?) ON CONFLICT(account_id) DO UPDATE SET payload = excluded.payload", arguments: [accountID, encrypted]) }
+    }
+
+    public func delete(accountID: String) throws {
+        try database.write { db in try db.execute(sql: "DELETE FROM pipo_cache_accounts WHERE account_id = ?", arguments: [accountID]) }
+    }
+
+    public func loadLocalState(accountID: String) throws -> PipoLocalState {
+        var encrypted: Data? = try database.read { db in
+            try Data.fetchOne(db, sql: "SELECT payload FROM pipo_local_state_accounts WHERE account_id = ?", arguments: [accountID])
+        }
+        var isLegacy = false
+        if encrypted == nil {
+            encrypted = try database.read { db in try Data.fetchOne(db, sql: "SELECT payload FROM pipo_local_state WHERE id = 1") }
+            isLegacy = encrypted != nil
+        }
+        guard let encrypted else { return PipoLocalState() }
+        do {
+            let state = try JSONDecoder().decode(PipoLocalState.self, from: AES.GCM.open(AES.GCM.SealedBox(combined: encrypted), using: key))
+            if isLegacy {
+                try saveLocalState(state, accountID: accountID)
+                try database.write { db in try db.execute(sql: "DELETE FROM pipo_local_state") }
+            }
+            return state
+        } catch {
+            try deleteLocalState(accountID: accountID)
+            return PipoLocalState()
+        }
+    }
+
+    public func saveLocalState(_ state: PipoLocalState, accountID: String) throws {
+        let encrypted = try AES.GCM.seal(JSONEncoder().encode(state), using: key).combined.unwrap(or: PipoCoreError.operationFailed("State encryption failed"))
+        try database.write { db in
+            try db.execute(sql: "INSERT INTO pipo_local_state_accounts (account_id, payload) VALUES (?, ?) ON CONFLICT(account_id) DO UPDATE SET payload = excluded.payload", arguments: [accountID, encrypted])
+        }
+    }
+
+    public func deleteLocalState(accountID: String) throws {
+        try database.write { db in try db.execute(sql: "DELETE FROM pipo_local_state_accounts WHERE account_id = ?", arguments: [accountID]) }
+    }
+
+    public func deleteAllLocalState() throws {
+        try database.write { db in
+            try db.execute(sql: "DELETE FROM pipo_local_state_accounts")
+            try db.execute(sql: "DELETE FROM pipo_local_state")
+        }
     }
 }
 

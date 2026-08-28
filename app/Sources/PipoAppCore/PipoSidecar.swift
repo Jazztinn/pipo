@@ -38,7 +38,7 @@ public struct SidecarRequest: Codable, Sendable {
     public let method: String
     public let params: [String: PipoJSONValue]
 
-    public init(version: Int = 3, method: String, params: [String: PipoJSONValue]) {
+    public init(version: Int = 4, method: String, params: [String: PipoJSONValue]) {
         self.version = version
         self.id = UUID().uuidString
         self.method = method
@@ -67,6 +67,11 @@ public struct SidecarFailure: Codable, Sendable {
 
 public protocol PipoSidecarTransport: Sendable {
     func send(_ request: SidecarRequest) async throws -> SidecarResponse
+    func shutdown() async
+}
+
+public extension PipoSidecarTransport {
+    func shutdown() async {}
 }
 
 public actor PipoCoreProcessTransport: PipoSidecarTransport {
@@ -76,48 +81,85 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
     private var stdout: FileHandle?
     private var stdoutBuffer = Data()
     private var stderrDrain: Task<Void, Never>?
+    private var pending: [String: PendingResponse] = [:]
+    private var didHandshake = false
+    private var startupTask: Task<Void, Error>?
+    private var requestInProgress = false
+    private var sendWaiters: [(id: String, continuation: CheckedContinuation<Void, Error>)] = []
+
+    private struct PendingResponse {
+        let continuation: CheckedContinuation<SidecarResponse, Error>
+        let timeout: Task<Void, Never>
+    }
 
     public init(executableURL: URL? = nil) {
         self.executableURL = executableURL ?? Self.defaultExecutableURL()
     }
 
     public func send(_ request: SidecarRequest) async throws -> SidecarResponse {
-        var finalError: Error = PipoCoreError.sidecarUnavailable
-        var validResponse: SidecarResponse?
-        for attempt in 0..<2 {
-            do {
-                try startIfNeeded()
-                guard let stdin, let stdout else { throw PipoCoreError.sidecarUnavailable }
-                stdin.write(try JSONEncoder().encode(request) + Data([0x0A]))
-                let timeout: TimeInterval = ["refresh_dashboard", "load_course"].contains(request.method) ? 65 : 25
-                let line = try readLine(from: stdout, timeout: timeout)
-                let response = try JSONDecoder().decode(SidecarResponse.self, from: line)
-                try response.validate(for: request)
-                validResponse = response
-                break
-            } catch {
-                finalError = error
-                stopSession()
-                if attempt == 1 || !Self.shouldRetryTransport(error) { break }
-            }
-        }
-        guard let response = validResponse else { throw finalError }
+        guard request.version == 4 else { throw PipoCoreError.invalidResponse }
+        try await acquireRequestSlot(id: request.id)
+        defer { releaseRequestSlot() }
+        try await startIfNeeded()
+        let timeout: TimeInterval = request.method == "refresh_dashboard" ? 50 : request.method == "load_course" ? 35 : 25
+        let response = try await sendWrittenRequest(request, timeout: timeout)
         if let failure = response.error { throw failure.classifiedError }
         return response
     }
 
-    public func shutdown() {
+    public func shutdown() async {
         stopSession()
+        let waiters = sendWaiters
+        sendWaiters.removeAll()
+        for waiter in waiters { waiter.continuation.resume(throwing: CancellationError()) }
     }
 
-    private static func shouldRetryTransport(_ error: Error) -> Bool {
-        guard !Task.isCancelled else { return false }
-        guard let error = error as? PipoCoreError else { return true }
-        return error == .sidecarUnavailable || error == .invalidResponse
+    private func acquireRequestSlot(id: String) async throws {
+        if !requestInProgress {
+            requestInProgress = true
+            return
+        }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                sendWaiters.append((id, continuation))
+            }
+        } onCancel: {
+            Task { await self.cancelSendWaiter(id: id) }
+        }
     }
 
-    private func startIfNeeded() throws {
-        if process?.isRunning == true { return }
+    private func cancelSendWaiter(id: String) {
+        guard let index = sendWaiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = sendWaiters.remove(at: index)
+        waiter.continuation.resume(throwing: CancellationError())
+    }
+
+    private func releaseRequestSlot() {
+        if sendWaiters.isEmpty {
+            requestInProgress = false
+        } else {
+            let waiter = sendWaiters.removeFirst()
+            waiter.continuation.resume()
+        }
+    }
+
+    private func startIfNeeded() async throws {
+        if process?.isRunning == true, didHandshake { return }
+        if let startupTask {
+            try await startupTask.value
+            return
+        }
+        let task = Task { try await self.launchAndHandshake() }
+        startupTask = task
+        defer { startupTask = nil }
+        try await task.value
+    }
+
+    private func launchAndHandshake() async throws {
         stopSession()
         guard FileManager.default.isExecutableFile(atPath: executableURL.path) else { throw PipoCoreError.sidecarUnavailable }
         let process = Process()
@@ -132,45 +174,96 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
         self.process = process
         stdin = input.fileHandleForWriting
         stdout = output.fileHandleForReading
+        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            Task { await self?.consume(data) }
+        }
         let errorHandle = errors.fileHandleForReading
         stderrDrain = Task.detached(priority: .utility) {
             _ = try? errorHandle.readToEnd()
         }
-    }
-
-    private func readLine(from handle: FileHandle, timeout: TimeInterval) throws -> Data {
-        let timeoutNanoseconds = UInt64(max(timeout, 1) * 1_000_000_000)
-        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
-        while true {
-            if let newline = stdoutBuffer.firstIndex(of: 0x0A) {
-                let line = Data(stdoutBuffer[..<newline])
-                stdoutBuffer.removeSubrange(...newline)
-                return line
-            }
-            let now = DispatchTime.now().uptimeNanoseconds
-            guard now < deadline else { throw PipoCoreError.timedOut }
-            var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
-            let remainingMilliseconds = Int32(min((deadline - now) / 1_000_000, UInt64(Int32.max)))
-            let ready = Darwin.poll(&descriptor, 1, remainingMilliseconds)
-            guard ready > 0 else {
-                if ready == 0 { throw PipoCoreError.timedOut }
-                throw PipoCoreError.sidecarUnavailable
-            }
-            var bytes = [UInt8](repeating: 0, count: 64 * 1024)
-            let count = bytes.withUnsafeMutableBytes { buffer in
-                Darwin.read(handle.fileDescriptor, buffer.baseAddress, buffer.count)
-            }
-            if count < 0 {
-                if errno == EINTR { continue }
-                throw PipoCoreError.sidecarUnavailable
-            }
-            guard count > 0 else { throw PipoCoreError.invalidResponse }
-            stdoutBuffer.append(contentsOf: bytes.prefix(count))
-            guard stdoutBuffer.count <= 8 * 1024 * 1024 else { throw PipoCoreError.invalidResponse }
+        let hello = SidecarRequest(
+            method: "hello",
+            params: ["wire_protocol": .number(4), "snapshot_schema": .number(3)]
+        )
+        do {
+            let response = try await sendWrittenRequest(hello, timeout: 10)
+            guard response.error == nil,
+                  let result = response.result,
+                  case .object(let object) = result,
+                  object["wire_protocol"] == .number(4)
+            else { throw PipoCoreError.invalidResponse }
+            didHandshake = true
+        } catch {
+            stopSession(error: error)
+            throw error
         }
     }
 
-    private func stopSession() {
+    private func sendWrittenRequest(_ request: SidecarRequest, timeout: TimeInterval) async throws -> SidecarResponse {
+        guard let stdin, process?.isRunning == true else { throw PipoCoreError.sidecarUnavailable }
+        let payload = try JSONEncoder().encode(request) + Data([0x0A])
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let timeoutTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(timeout))
+                    guard !Task.isCancelled else { return }
+                    await self?.timeout(requestID: request.id)
+                }
+                pending[request.id] = PendingResponse(continuation: continuation, timeout: timeoutTask)
+                do {
+                    try stdin.write(contentsOf: payload)
+                } catch {
+                    pending.removeValue(forKey: request.id)?.timeout.cancel()
+                    continuation.resume(throwing: PipoCoreError.sidecarUnavailable)
+                    stopSession(error: PipoCoreError.sidecarUnavailable)
+                }
+            }
+        } onCancel: {
+            Task { await self.cancel(requestID: request.id) }
+        }
+    }
+
+    private func consume(_ data: Data) {
+        guard !data.isEmpty else {
+            stopSession(error: PipoCoreError.sidecarUnavailable)
+            return
+        }
+        stdoutBuffer.append(data)
+        guard stdoutBuffer.count <= 8 * 1024 * 1024 else {
+            stopSession(error: PipoCoreError.invalidResponse)
+            return
+        }
+        while let newline = stdoutBuffer.firstIndex(of: 0x0A) {
+            let line = Data(stdoutBuffer[..<newline])
+            stdoutBuffer.removeSubrange(...newline)
+            guard let response = try? JSONDecoder().decode(SidecarResponse.self, from: line),
+                  response.version == 4,
+                  let pendingResponse = pending.removeValue(forKey: response.id)
+            else {
+                stopSession(error: PipoCoreError.invalidResponse)
+                return
+            }
+            pendingResponse.timeout.cancel()
+            pendingResponse.continuation.resume(returning: response)
+        }
+    }
+
+    private func timeout(requestID: String) {
+        guard let pendingResponse = pending.removeValue(forKey: requestID) else { return }
+        pendingResponse.timeout.cancel()
+        pendingResponse.continuation.resume(throwing: PipoCoreError.timedOut)
+        stopSession(error: PipoCoreError.timedOut)
+    }
+
+    private func cancel(requestID: String) {
+        guard let pendingResponse = pending.removeValue(forKey: requestID) else { return }
+        pendingResponse.timeout.cancel()
+        pendingResponse.continuation.resume(throwing: CancellationError())
+    }
+
+    private func stopSession(error: Error = PipoCoreError.sidecarUnavailable) {
+        stdout?.readabilityHandler = nil
         try? stdin?.close()
         try? stdout?.close()
         if process?.isRunning == true { process?.terminate() }
@@ -180,6 +273,13 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
         stdin = nil
         stdout = nil
         process = nil
+        didHandshake = false
+        let waiting = pending.values
+        pending.removeAll()
+        for response in waiting {
+            response.timeout.cancel()
+            response.continuation.resume(throwing: error)
+        }
     }
 
     nonisolated private static func defaultExecutableURL() -> URL {

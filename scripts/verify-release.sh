@@ -14,12 +14,16 @@ test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/MenuWeb/index.html"
 test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/MenuWeb/css/fontawesome.min.css"
 test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/MenuWeb/webfonts/fa-solid-900.woff2"
 test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/PipoLogoHollow.png"
+test -f "$APP/Contents/Resources/Pipo_PipoUI.bundle/WhatsNew.json"
 test -s "$APP/Contents/Resources/Legal/LICENSE.txt"
 test -s "$APP/Contents/Resources/Legal/THIRD_PARTY_NOTICES.md"
 plutil -lint "$APP/Contents/Info.plist"
 codesign --verify --deep --strict --verbose=2 "$APP"
-if spctl --assess --type execute --verbose=2 "$APP"; then
-  echo "Gatekeeper accepted the app."
+lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/PipoApp"
+lipo -verify_arch arm64 x86_64 "$APP/Contents/MacOS/pipo-core"
+if [ "${REQUIRE_NOTARIZATION:-0}" = "1" ]; then
+  spctl --assess --type execute --verbose=2 "$APP"
+  xcrun stapler validate "$APP"
 else
-  echo "Gatekeeper did not accept this unnotarized testing build; the in-app pre-release notice covers this expected warning." >&2
+  spctl --assess --type execute --verbose=2 "$APP" || echo "Gatekeeper acceptance is required only for notarized release builds." >&2
 fi

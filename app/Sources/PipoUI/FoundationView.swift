@@ -418,6 +418,10 @@ public struct PipoUIConfiguration {
     public var loadCourse: @MainActor (Int) async throws -> CourseDetail?
     public var openURL: @MainActor (URL) -> Void
     public var installUpdate: (@MainActor () -> Void)?
+    public var updatePresentation: PipoUpdatePresentationModel?
+    public var viewUpdate: (@MainActor () -> Void)?
+    public var dismissUpdate: @MainActor () -> Void
+    public var dismissWhatsNew: @MainActor () -> Void
     public var clearCache: @MainActor () async throws -> Void
     public var exportDiagnostics: (@MainActor () -> Void)?
     public var addToCalendar: (@MainActor (PipoCalendarEntry) -> Void)?
@@ -445,6 +449,10 @@ public struct PipoUIConfiguration {
         loadCourse: @escaping @MainActor (Int) async throws -> CourseDetail? = { _ in nil },
         openURL: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
         installUpdate: (@MainActor () -> Void)? = nil,
+        updatePresentation: PipoUpdatePresentationModel? = nil,
+        viewUpdate: (@MainActor () -> Void)? = nil,
+        dismissUpdate: @escaping @MainActor () -> Void = {},
+        dismissWhatsNew: @escaping @MainActor () -> Void = {},
         clearCache: @escaping @MainActor () async throws -> Void = {},
         exportDiagnostics: (@MainActor () -> Void)? = nil,
         addToCalendar: (@MainActor (PipoCalendarEntry) -> Void)? = nil,
@@ -471,6 +479,10 @@ public struct PipoUIConfiguration {
         self.loadCourse = loadCourse
         self.openURL = openURL
         self.installUpdate = installUpdate
+        self.updatePresentation = updatePresentation
+        self.viewUpdate = viewUpdate ?? installUpdate
+        self.dismissUpdate = dismissUpdate
+        self.dismissWhatsNew = dismissWhatsNew
         self.clearCache = clearCache
         self.exportDiagnostics = exportDiagnostics
         self.addToCalendar = addToCalendar
@@ -487,7 +499,11 @@ public struct PipoUIConfiguration {
         self.retrySecureStorageAccess = retrySecureStorageAccess
     }
 
-    public init(model: PipoModel, installUpdate: (@MainActor () -> Void)? = nil) {
+    public init(
+        model: PipoModel,
+        installUpdate: (@MainActor () -> Void)? = nil,
+        updatePresentation: PipoUpdatePresentationModel? = nil
+    ) {
         self.init(
             modelBacked: true,
             initialPhase: Self.phase(for: model.phase),
@@ -517,6 +533,10 @@ public struct PipoUIConfiguration {
                 NSWorkspace.shared.open(destination)
             },
             installUpdate: installUpdate,
+            updatePresentation: updatePresentation,
+            viewUpdate: installUpdate,
+            dismissUpdate: { updatePresentation?.dismissUpdate() },
+            dismissWhatsNew: { updatePresentation?.dismissWhatsNew() },
             clearCache: { await model.clearCache() },
             exportDiagnostics: { Self.exportDiagnostics(model) },
             addToCalendar: { entry in
@@ -1066,7 +1086,6 @@ private struct PipoOnboardingView: View {
     @State private var token = ""
     @State private var validationMessage: String?
     @AppStorage(PipoLegal.acknowledgementKey) private var acceptedLegalVersion = ""
-    @AppStorage(PipoLegal.preReleaseAcknowledgementKey) private var acceptedPreReleaseVersion = ""
     var externalError: String? = nil
     var transparentOuterHost = false
     let onPasswordSignIn: (String, String) -> Void
@@ -1092,9 +1111,6 @@ private struct PipoOnboardingView: View {
                     Spacer(minLength: 0)
                 }
 
-                if acceptedPreReleaseVersion != PipoLegal.preReleaseVersion {
-                    PipoPreReleaseNoticeView()
-                } else {
                 Group {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Connect to LPU Cavite LMS")
@@ -1176,7 +1192,6 @@ private struct PipoOnboardingView: View {
                 .buttonStyle(.link)
                 .help("Open the school LMS in your browser")
                 }
-                }
             }
             .padding(24)
             .foregroundStyle(.white)
@@ -1189,10 +1204,6 @@ private struct PipoOnboardingView: View {
     }
 
     private func submitPassword() {
-        guard acceptedPreReleaseVersion == PipoLegal.preReleaseVersion else {
-            validationMessage = "Continue through the Pre-Release & Permissions notice first."
-            return
-        }
         guard acceptedLegalVersion == PipoLegal.currentVersion else {
             validationMessage = "Acknowledge the Terms of Use and Privacy Policy to continue."
             return
@@ -1212,10 +1223,6 @@ private struct PipoOnboardingView: View {
     }
 
     private func submitToken() {
-        guard acceptedPreReleaseVersion == PipoLegal.preReleaseVersion else {
-            validationMessage = "Continue through the Pre-Release & Permissions notice first."
-            return
-        }
         guard acceptedLegalVersion == PipoLegal.currentVersion else {
             validationMessage = "Acknowledge the Terms of Use and Privacy Policy to continue."
             return

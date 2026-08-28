@@ -30,6 +30,7 @@ let package = Package(
                 .copy("Resources/MenuWeb"),
                 .copy("Resources/PipoLogoHollow.png"),
                 .copy("Resources/Legal"),
+                .copy("Resources/WhatsNew.json"),
             ]
         ),
         .executableTarget(

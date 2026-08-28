@@ -29,12 +29,6 @@ func legalAcknowledgementIsVersionedAndLocal() throws {
     defer { defaults.removePersistentDomain(forName: suiteName) }
 
     #expect(!PipoLegal.isAcknowledged(in: defaults))
-    #expect(!PipoLegal.isPreReleaseAcknowledged(in: defaults))
-    PipoLegal.setPreReleaseAcknowledged(true, in: defaults)
-    #expect(PipoLegal.isPreReleaseAcknowledged(in: defaults))
-    #expect(defaults.string(forKey: PipoLegal.preReleaseAcknowledgementKey) == PipoLegal.preReleaseVersion)
-    PipoLegal.setPreReleaseAcknowledged(false, in: defaults)
-    #expect(!PipoLegal.isPreReleaseAcknowledged(in: defaults))
     PipoLegal.setAcknowledged(true, in: defaults)
     #expect(PipoLegal.isAcknowledged(in: defaults))
     #expect(defaults.string(forKey: PipoLegal.acknowledgementKey) == PipoLegal.currentVersion)
@@ -261,6 +255,99 @@ func configurationDefaultsToOnboardingAndNoUpdateBanner() {
     #expect(configuration.initialPhase == .onboarding)
     #expect(configuration.initialSnapshot == nil)
     #expect(configuration.installUpdate == nil)
+    #expect(configuration.updatePresentation == nil)
+}
+
+@Test
+@MainActor
+func updatePresentationIsQuietOnFirstInstallAndShowsUpgradeOnce() throws {
+    let suiteName = "PipoUpdatePresentationTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let manifest = PipoWhatsNew(
+        version: "0.5.0",
+        build: 27,
+        items: ["Safer sync.", "Update notices."]
+    )
+
+    let firstInstall = PipoUpdatePresentationModel(
+        currentVersion: "0.5.0",
+        currentBuild: 27,
+        defaults: defaults,
+        existingInstallation: false,
+        whatsNew: manifest
+    )
+    #expect(firstInstall.whatsNew == nil)
+
+    defaults.removePersistentDomain(forName: suiteName)
+    _ = PipoUpdatePresentationModel(
+        currentVersion: "0.4.18",
+        currentBuild: 26,
+        defaults: defaults,
+        existingInstallation: true,
+        whatsNew: manifest
+    )
+    let upgrade = PipoUpdatePresentationModel(
+        currentVersion: "0.5.0",
+        currentBuild: 27,
+        defaults: defaults,
+        existingInstallation: true,
+        whatsNew: manifest
+    )
+    #expect(upgrade.whatsNew == manifest)
+    upgrade.dismissWhatsNew()
+    #expect(upgrade.whatsNew == nil)
+
+    let repeatedLaunch = PipoUpdatePresentationModel(
+        currentVersion: "0.5.0",
+        currentBuild: 27,
+        defaults: defaults,
+        existingInstallation: true,
+        whatsNew: manifest
+    )
+    #expect(repeatedLaunch.whatsNew == nil)
+}
+
+@Test
+@MainActor
+func updateDismissalIsSessionOnlyAndCriticalNoticePersists() throws {
+    let defaults = try #require(UserDefaults(suiteName: "PipoUpdateDismissalTests.\(UUID().uuidString)"))
+    let presentation = PipoUpdatePresentationModel(
+        currentVersion: "0.5.0",
+        currentBuild: 27,
+        defaults: defaults,
+        existingInstallation: false,
+        whatsNew: nil
+    )
+    presentation.presentUpdate(version: "0.5.1", build: "28", critical: false)
+    presentation.dismissUpdate()
+    #expect(presentation.updateNotice == nil)
+    presentation.presentUpdate(version: "0.5.1", build: "28", critical: false)
+    #expect(presentation.updateNotice == nil)
+    presentation.presentUpdate(version: "0.5.1", build: "28", critical: true)
+    presentation.dismissUpdate()
+    #expect(presentation.updateNotice?.severity == .critical)
+    presentation.clearUpdateNotice()
+    presentation.presentUpdate(version: "0.5.2", build: "29", critical: false)
+    #expect(presentation.updateNotice?.severity == .critical)
+}
+
+@Test
+@MainActor
+func bundledWhatsNewManifestHasConciseReleaseItems() throws {
+    let url = try #require(PipoResources.url(forResource: "WhatsNew", withExtension: "json"))
+    let manifest = try JSONDecoder().decode(PipoWhatsNew.self, from: Data(contentsOf: url))
+    #expect(manifest.version == "0.5.0")
+    #expect(manifest.build == 27)
+    #expect(manifest.isValid)
+}
+
+@Test
+func updateProbePolicyThrottlesForOneDay() {
+    let now = Date(timeIntervalSince1970: 2_000_000_000)
+    #expect(PipoUpdateProbePolicy.isDue(lastProbe: nil, now: now))
+    #expect(!PipoUpdateProbePolicy.isDue(lastProbe: now.addingTimeInterval(-86_399), now: now))
+    #expect(PipoUpdateProbePolicy.isDue(lastProbe: now.addingTimeInterval(-86_400), now: now))
 }
 
 @Test

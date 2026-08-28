@@ -38,7 +38,7 @@ test -x "$SPARKLE_BIN/generate_appcast"
 mkdir "$EXTRACTED" "$UPDATES"
 ditto -x -k "$ARCHIVE" "$EXTRACTED"
 test -d "$EXTRACTED/Pipo.app"
-"$ROOT/scripts/build-dmg.sh" "$EXTRACTED/Pipo.app" "$UPDATES/Pipo-$VERSION-arm64.dmg"
+"$ROOT/scripts/build-dmg.sh" "$EXTRACTED/Pipo.app" "$UPDATES/Pipo-$VERSION-universal.dmg"
 
 set -- --account com.jazztinn.pipo
 if [ -n "$SPARKLE_KEY_FILE" ]; then
@@ -55,7 +55,7 @@ fi
   "$UPDATES"
 
 gh release create "$TAG" \
-  "$UPDATES/Pipo-$VERSION-arm64.dmg" \
+  "$UPDATES/Pipo-$VERSION-universal.dmg" \
   "$ARCHIVE#Pipo $VERSION portable ZIP" \
   --repo Jazztinn/pipo \
   --title "Pipo $VERSION" \
