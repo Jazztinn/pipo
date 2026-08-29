@@ -195,8 +195,35 @@
       border-bottom-color: rgba(251,113,133,0.3);
     }
     #update-notice button, #whats-new-dialog button { min-height: 28px; }
-    #whats-new-backdrop { background: rgba(0,0,0,0.58); backdrop-filter: blur(10px); }
-    #whats-new-dialog { width: min(330px, calc(100% - 32px)); }
+    #whats-new-backdrop {
+      inset: 0;
+      z-index: 95;
+      background: rgba(0,0,0,0.58);
+      backdrop-filter: blur(10px);
+    }
+    #whats-new-dialog {
+      width: min(330px, calc(100% - 32px));
+      padding: 20px;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 16px;
+    }
+    #whats-new-items {
+      margin-top: 12px;
+      padding-left: 16px;
+      list-style: disc;
+    }
+    #whats-new-items > li + li { margin-top: 8px; }
+    #whats-new-dialog > div:last-child {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+    #dismiss-whats-new {
+      padding: 0 12px;
+      border-radius: 8px;
+      background: rgb(244,63,94);
+    }
+    #dismiss-whats-new:hover { background: rgb(251,113,133); }
     @media (prefers-reduced-motion: reduce) {
       #update-notice *, #whats-new-backdrop, #whats-new-dialog { animation: none !important; transition: none !important; }
     }

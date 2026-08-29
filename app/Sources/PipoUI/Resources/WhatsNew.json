@@ -1,11 +1,10 @@
 {
-  "version": "0.5.0",
-  "build": 27,
+  "version": "0.5.1",
+  "build": 28,
   "importance": "standard",
   "channel": "stable",
   "items": [
-    "Safer syncing when you change accounts or reconnect.",
-    "Faster dashboard refreshes with clearer saved-data status.",
-    "Update notices and short summaries for new Pipo versions."
+    "Fixed the What’s New window layout and positioning.",
+    "Restored readable spacing, bullets, and Done button styling."
   ]
 }
