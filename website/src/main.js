@@ -1,3 +1,4 @@
+import { inject } from "@vercel/analytics";
 import { initHorizontalScroll } from "./horizontal-scroll.js";
 import {
   BOAT_WAVE_HEIGHT,
@@ -5,6 +6,8 @@ import {
   createBoatWavePath,
   sampleBoatWave,
 } from "./boat-wave.js";
+
+inject();
 
 const clickSound = new Audio("/pipoclick.mp3");
 clickSound.preload = "auto";
