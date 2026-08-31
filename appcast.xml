@@ -3,6 +3,23 @@
     <channel>
         <title>Pipo</title>
         <item>
+            <title>0.5.2</title>
+            <pubDate>Mon, 31 Aug 2026 10:40:35 +0000</pubDate>
+            <link>https://github.com/Jazztinn/pipo</link>
+            <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
+            <sparkle:version>29</sparkle:version>
+            <sparkle:shortVersionString>0.5.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# Pipo 0.5.2
+
+- Simplified the installer with a crimson-to-black background.
+- Removed installer instructions and card panels for a cleaner window.
+
+> This build is not notarized. macOS may require manual approval before first launch.
+]]></description>
+            <enclosure url="https://github.com/Jazztinn/pipo/releases/download/v0.5.2/Pipo-0.5.2-universal.dmg" length="13972339" type="application/octet-stream" sparkle:edSignature="g3ryV3p6Mvi7FsR1rJa07POw6VbNfap5Eh1nBxaNFE7zpr0VTG/9kgLa/KtNFNnvo11sf+rRenVD13z/wyT8Dg=="/>
+        </item>
+        <item>
             <title>0.5.1</title>
             <pubDate>Sat, 29 Aug 2026 01:04:17 +0000</pubDate>
             <link>https://github.com/Jazztinn/pipo</link>
