@@ -47,3 +47,9 @@ test("mobile site stays a single landing surface with file-safe assets", () => {
   assert.doesNotMatch(mobileSite, /src="\/pipo-logo\.png"/);
   assert.match(mobileSite, /src="\.\/pipo-logo\.png"/);
 });
+
+test("homepage publishes the supplied screenshot as its social preview", () => {
+  assert.match(indexHtml, /property="og:image" content="https:\/\/pipo\.jazztinn\.me\/pipo-social-preview\.png"/);
+  assert.match(indexHtml, /name="twitter:card" content="summary_large_image"/);
+  assert.match(indexHtml, /name="twitter:image" content="https:\/\/pipo\.jazztinn\.me\/pipo-social-preview\.png"/);
+});
