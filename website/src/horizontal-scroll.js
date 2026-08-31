@@ -1,17 +1,16 @@
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 
-gsap.registerPlugin(ScrollTrigger);
-
 export function initHorizontalScroll(
   stage,
   track,
-  { onPanelChange, onNavigateReady } = {},
+  { onPanelChange, onPanelProgress, onNavigateReady } = {},
 ) {
   if (!stage || !track) return () => {};
 
+  gsap.registerPlugin(ScrollTrigger);
   const media = gsap.matchMedia();
-  const panels = [...track.querySelectorAll("[data-panel]")];
+  const panels = [...track.querySelectorAll("[data-panel]:not([hidden])")];
   const lastPanelIndex = Math.max(0, panels.length - 1);
   let refreshFrame = 0;
   const refresh = () => {
@@ -39,6 +38,7 @@ export function initHorizontalScroll(
           directional: false,
         } : false,
         onUpdate(self) {
+          onPanelProgress?.(self.progress);
           const panelIndex = Math.round(self.progress * lastPanelIndex);
           onPanelChange?.(panelIndex);
         },
@@ -56,12 +56,22 @@ export function initHorizontalScroll(
     };
 
     onNavigateReady?.(navigateToPanel);
+    onPanelProgress?.(0);
     onPanelChange?.(0);
 
     const normalizeWheelDelta = (event, delta) => {
       if (event.deltaMode === 1) return delta * 16;
       if (event.deltaMode === 2) return delta * window.innerHeight;
       return delta;
+    };
+
+    const canScrollInside = (target, delta) => {
+      if (!(target instanceof Element)) return false;
+      const scrollable = target.closest("textarea, [data-scrollable]");
+      if (!scrollable || scrollable.scrollHeight <= scrollable.clientHeight) return false;
+      return delta < 0
+        ? scrollable.scrollTop > 0
+        : scrollable.scrollTop + scrollable.clientHeight < scrollable.scrollHeight - 1;
     };
 
     const handleWheel = (event) => {
@@ -74,6 +84,7 @@ export function initHorizontalScroll(
       const rawDelta = horizontalGesture ? event.deltaX : event.deltaY;
       const delta = normalizeWheelDelta(event, rawDelta);
       if (delta === 0) return;
+      if (!horizontalGesture && canScrollInside(event.target, delta)) return;
 
       const scrollingElement = document.scrollingElement ?? document.documentElement;
       const current = scrollingElement.scrollTop;
@@ -118,7 +129,11 @@ export function initHorizontalScroll(
       window.scrollTo({ left: panels[safeIndex]?.offsetLeft ?? 0, behavior: "auto" });
     };
 
-    const updateActivePanel = () => onPanelChange?.(getPanelIndex());
+    const updateActivePanel = () => {
+      const panelIndex = getPanelIndex();
+      onPanelProgress?.(lastPanelIndex ? panelIndex / lastPanelIndex : 0);
+      onPanelChange?.(panelIndex);
+    };
 
     onNavigateReady?.(navigateToPanel);
     updateActivePanel();

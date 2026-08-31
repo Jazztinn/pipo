@@ -92,6 +92,10 @@ function SmoothCursor() {
   );
 }
 
+function nativeScaleFor(element) {
+  return Number.parseFloat(getComputedStyle(element).getPropertyValue("--macos-ui-scale")) || 1;
+}
+
 function AboutPipo({ onClose }) {
   const layerRef = useRef(null);
   const windowRef = useRef(null);
@@ -110,10 +114,11 @@ function AboutPipo({ onClose }) {
     const layer = layerRef.current;
     const modal = windowRef.current;
     if (!layer || !modal) return;
+    const scale = nativeScaleFor(layer);
     const layerRect = layer.getBoundingClientRect();
     const windowRect = modal.getBoundingClientRect();
-    const left = windowRect.left - layerRect.left;
-    const top = windowRect.top - layerRect.top;
+    const left = (windowRect.left - layerRect.left) / scale;
+    const top = (windowRect.top - layerRect.top) / scale;
     setPosition({ left, top });
     dragRef.current = {
       pointerId: event.pointerId,
@@ -121,10 +126,10 @@ function AboutPipo({ onClose }) {
       startY: event.clientY,
       left,
       top,
-      width: windowRect.width,
-      height: windowRect.height,
-      layerWidth: layerRect.width,
-      layerHeight: layerRect.height,
+      width: windowRect.width / scale,
+      height: windowRect.height / scale,
+      layerWidth: layer.clientWidth,
+      layerHeight: layer.clientHeight,
     };
     event.currentTarget.setPointerCapture?.(event.pointerId);
     globalThis.window.addEventListener('pointermove', handlePointerMove);
@@ -195,12 +200,13 @@ function AboutMac({ onClose }) {
     const layer = layerRef.current;
     const modal = windowRef.current;
     if (!layer || !modal) return;
+    const scale = nativeScaleFor(layer);
     const layerRect = layer.getBoundingClientRect();
     const windowRect = modal.getBoundingClientRect();
-    const left = windowRect.left - layerRect.left;
-    const top = windowRect.top - layerRect.top;
+    const left = (windowRect.left - layerRect.left) / scale;
+    const top = (windowRect.top - layerRect.top) / scale;
     setPosition({ left, top });
-    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, left, top, width: windowRect.width, height: windowRect.height, layerWidth: layerRect.width, layerHeight: layerRect.height };
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, left, top, width: windowRect.width / scale, height: windowRect.height / scale, layerWidth: layer.clientWidth, layerHeight: layer.clientHeight };
     event.currentTarget.setPointerCapture?.(event.pointerId);
     globalThis.window.addEventListener("pointermove", handlePointerMove);
     globalThis.window.addEventListener("pointerup", stopDragging, { once: true });
@@ -253,10 +259,33 @@ function AboutMac({ onClose }) {
 }
 
 export function MacOSDesktop() {
+  const desktopRef = useRef(null);
   const [aboutOpen, setAboutOpen] = useState(true);
   const [aboutMacOpen, setAboutMacOpen] = useState(false);
   const [pipoOpen, setPipoOpen] = useState(true);
+  const [pipoMounted, setPipoMounted] = useState(true);
+  const [spotlightActive, setSpotlightActive] = useState(true);
   const [isPoweringOff, setIsPoweringOff] = useState(false);
+
+  useEffect(() => {
+    const desktop = desktopRef.current;
+    if (!desktop) return undefined;
+    const updateScale = () => {
+      const pipoScale = Math.min(desktop.clientWidth / 1440, desktop.clientHeight / 1080);
+      desktop.style.setProperty("--pipo-ui-scale", String(pipoScale));
+      desktop.style.setProperty("--macos-ui-scale", String(pipoScale * 2));
+    };
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(desktop);
+    return () => observer.disconnect();
+  }, []);
+
+  const openPipo = () => {
+    setPipoMounted(true);
+    setPipoOpen(true);
+  };
+  const closePipo = () => setPipoOpen(false);
 
   const handleSystemPower = () => {
     if (isPoweringOff) return;
@@ -327,7 +356,7 @@ export function MacOSDesktop() {
   };
 
   return (
-    <div className="macos-desktop" aria-label="macOS desktop">
+    <div ref={desktopRef} className="macos-desktop" aria-label="macOS desktop">
       <img
         className="macos-wallpaper"
         src="./lpubg-statue.png"
@@ -335,28 +364,32 @@ export function MacOSDesktop() {
         draggable="false"
       />
       <div className="macos-wallpaper-tone" aria-hidden="true" />
-      <MenuBar
-        onAboutPipo={() => setAboutOpen(true)}
-        onAboutMac={() => setAboutMacOpen(true)}
-        onOpenPipo={() => setPipoOpen((open) => !open)}
-        onSystemPower={handleSystemPower}
-        onCloseAllWindows={() => { setAboutOpen(false); setAboutMacOpen(false); setPipoOpen(false); }}
-        onOpenAllWindows={() => { setAboutOpen(true); setAboutMacOpen(true); setPipoOpen(true); }}
-        onHidePipo={() => setPipoOpen(false)}
-        onHideOthers={() => { setAboutOpen(false); setAboutMacOpen(false); }}
-        onQuitPipo={() => { setAboutOpen(false); setAboutMacOpen(false); setPipoOpen(false); }}
-      />
       <div className="macos-try-pipo" aria-hidden="true">
         <svg className="macos-try-pipo-arrow" viewBox="0 0 190 185" focusable="false">
-          <path d="M20 169C24 123 43 85 76 55C99 34 124 23 157 22" />
-          <path d="M137 8L158 22L143 43" />
+          <path className="macos-try-pipo-tail" d="M20 169C24 123 43 85 76 55C99 34 124 23 157 22" />
+          <path className="macos-try-pipo-arrowhead" d="M158 22L137 8" />
+          <path className="macos-try-pipo-arrowhead" d="M158 22L143 43" />
         </svg>
         <span>try pipo</span>
       </div>
-      {pipoOpen && <PipoWindow onClose={() => setPipoOpen(false)} />}
-      <Dock />
-      {aboutOpen && <AboutPipo onClose={() => setAboutOpen(false)} />}
-      {aboutMacOpen && <AboutMac onClose={() => setAboutMacOpen(false)} />}
+      {pipoMounted && <PipoWindow onClose={closePipo} isExiting={!pipoOpen} onExitComplete={() => setPipoMounted(false)} onInteract={() => setSpotlightActive(false)} />}
+      <div className={`pipo-spotlight${spotlightActive ? "" : " is-fading"}`} aria-hidden="true" />
+      <div className="macos-native-ui">
+        <MenuBar
+          onAboutPipo={() => setAboutOpen(true)}
+          onAboutMac={() => setAboutMacOpen(true)}
+          onOpenPipo={() => (pipoOpen ? closePipo() : openPipo())}
+          onSystemPower={handleSystemPower}
+          onCloseAllWindows={() => { setAboutOpen(false); setAboutMacOpen(false); closePipo(); }}
+          onOpenAllWindows={() => { setAboutOpen(true); setAboutMacOpen(true); openPipo(); }}
+          onHidePipo={closePipo}
+          onHideOthers={() => { setAboutOpen(false); setAboutMacOpen(false); }}
+          onQuitPipo={() => { setAboutOpen(false); setAboutMacOpen(false); closePipo(); }}
+        />
+        <Dock />
+        {aboutOpen && <AboutPipo onClose={() => setAboutOpen(false)} />}
+        {aboutMacOpen && <AboutMac onClose={() => setAboutMacOpen(false)} />}
+      </div>
       {CUSTOM_CURSOR_ENABLED && <div className="macos-cursor-hitbox" aria-hidden="true" />}
       {CUSTOM_CURSOR_ENABLED && <SmoothCursor />}
     </div>

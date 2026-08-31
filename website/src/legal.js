@@ -6,17 +6,11 @@ const cartoonSound = document.querySelector("#pipo-cartoon-sound");
 document.addEventListener("click", (event) => {
   if (!(event.target instanceof Element)) return;
   const link = event.target.closest("a");
-  if (!link?.href.includes("/releases/latest")) return;
+  if (!link?.matches("[data-pipo-download]")) return;
 
-  event.preventDefault();
-  if (!cartoonSound) {
-    window.location.href = link.href;
-    return;
-  }
+  if (!cartoonSound) return;
   cartoonSound.currentTime = 0;
-  cartoonSound.play().catch(() => {}).finally(() => {
-    window.setTimeout(() => { window.location.href = link.href; }, 220);
-  });
+  cartoonSound.play().catch(() => {});
 }, true);
 
 try {

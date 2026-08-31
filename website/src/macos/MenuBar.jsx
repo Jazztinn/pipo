@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 const MENUS = [
-  { label: '', accessibleLabel: 'Apple', items: [{ label: 'About This Mac', action: 'about-mac' }, { divider: true }, { label: 'System Settings…', action: 'error-sound' }, { label: 'App Store…', action: 'error-sound' }, { divider: true }, { label: 'Restart…', action: 'restart' }, { label: 'Shut Down…', action: 'shutdown' }] },
+  { label: '', accessibleLabel: 'Apple', items: [{ label: 'About This Mac', action: 'about-mac' }, { divider: true }, { label: 'Restart…', action: 'restart' }, { label: 'Shut Down…', action: 'shutdown' }] },
   { label: 'Pipo', items: [{ label: 'About Pipo', action: 'about-pipo' }, { divider: true }, { label: 'Services', submenu: [{ label: 'No Services Apply' }] }, { divider: true }, { label: 'Hide Pipo', action: 'hide-pipo', shortcut: '⌘H' }, { label: 'Hide Others', action: 'hide-others', shortcut: '⌥⌘H' }, { divider: true }, { label: 'Quit Pipo', action: 'quit-pipo', shortcut: '⌘Q' }] },
   { label: 'Window', items: [{ label: 'Close All Windows', action: 'close-all' }, { label: 'Open All Windows', action: 'open-all' }] },
   { label: 'Help', items: [

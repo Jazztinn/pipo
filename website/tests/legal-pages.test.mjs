@@ -17,6 +17,7 @@ for (const [file, title, canonical, counterpart] of [
     assert.match(html, new RegExp(`Effective ${effectiveDate}`));
     assert.match(html, new RegExp(`href="${counterpart.replace(".", "\\.")}"`));
     assert.match(html, /href="\.\/index\.html"/);
+    assert.match(html, /href="\.\/Pipo-0\.5\.1-universal\.dmg" download="Pipo-0\.5\.1-universal\.dmg" data-pipo-download/);
   });
 }
 

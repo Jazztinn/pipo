@@ -86,8 +86,8 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(runtime, /requestAnimationFrame\(\(\) => window\.requestAnimationFrame/);
   assert.match(runtime, /event\.target === inspector && event\.animationName === 'inspector-panel-out'/);
   assert.match(runtime, /inspector\.dataset\.closing !== 'true'/);
-  assert.match(html, /@keyframes inspector-panel-in \{[\s\S]*from \{ transform: translateX\(var\(--inspector-enter-offset, 24px\)\); \}[\s\S]*to \{ transform: translateX\(0\); \}/);
-  assert.match(html, /@keyframes inspector-panel-out \{[\s\S]*from \{ transform: translateX\(0\); \}[\s\S]*to \{ transform: translateX\(var\(--inspector-enter-offset, 24px\)\); \}/);
+  assert.match(html, /@keyframes inspector-panel-in \{[\s\S]*from \{ opacity: 0; transform: translateX\(var\(--inspector-enter-offset, 24px\)\); \}[\s\S]*to \{ opacity: 1; transform: translateX\(0\); \}/);
+  assert.match(html, /@keyframes inspector-panel-out \{[\s\S]*from \{ opacity: 1; transform: translateX\(0\); \}[\s\S]*to \{ opacity: 0; transform: translateX\(var\(--inspector-enter-offset, 24px\)\); \}/);
   assert.match(html, /html\[data-host-mode="menuBar"\] body > \.relative > #inspector-viewport \{[^}]*z-index: 10/);
   assert.match(html, /#inspector-viewport\.is-transitioning \{\s*overflow: hidden/);
   assert.match(html, /body > \.relative > #inspector-viewport\.is-active \{\s*pointer-events: auto/);
