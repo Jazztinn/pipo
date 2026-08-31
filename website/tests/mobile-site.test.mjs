@@ -34,10 +34,9 @@ test("mobile site directs users to desktop live demo", () => {
   assert.match(mobileSite, /Share desktop link/);
 });
 
-test("mobile release button opens the GitHub repository", () => {
-  assert.match(mobileSite, /className="mobile-primary-button" href={githubUrl}/);
-  assert.doesNotMatch(mobileSite, /mobile-primary-button" href={releaseUrl}/);
-  assert.doesNotMatch(mobileSite, /const releaseUrl/);
+test("mobile release button opens the latest GitHub release", () => {
+  assert.match(mobileSite, /const releaseUrl = "https:\/\/github\.com\/Jazztinn\/pipo\/releases\/latest"/);
+  assert.match(mobileSite, /className="mobile-primary-button" href={releaseUrl}/);
 });
 
 test("mobile site stays a single landing surface with file-safe assets", () => {

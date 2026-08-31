@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 const githubUrl = "https://github.com/Jazztinn/pipo";
+const releaseUrl = "https://github.com/Jazztinn/pipo/releases/latest";
 const siteUrl = "https://pipo.jazztinn.me";
 
 function AppleMark() {
@@ -46,7 +47,7 @@ function MobileSite() {
             <img className="mobile-app-icon" src="./pipo-hero-logo.png" alt="Pipo app icon" width="168" height="168" />
             <h1 id="mobile-hero-title">Your LMS<br /><span>meets <img className="mobile-macos-wordmark" src="./macos-wordmark.png" alt="macOS" /></span></h1>
             <p className="mobile-hero-copy">Courses, deadlines, and announcements stay one click away from your Mac menu bar.</p>
-            <a className="mobile-primary-button" href={githubUrl}>
+            <a className="mobile-primary-button" href={releaseUrl}>
               <AppleMark /> View latest Mac release
             </a>
             <p className="mobile-platform-note">Requires macOS 14 or later</p>
