@@ -5,6 +5,7 @@ DerivedData/
 target/
 *.xcarchive
 *.dmg
+!website/public/Pipo-0.5.2-universal.dmg
 *.zip
 .env
 .env.*
