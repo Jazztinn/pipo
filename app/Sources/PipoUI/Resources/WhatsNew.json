@@ -1,10 +1,10 @@
 {
-  "version": "0.5.1",
-  "build": 28,
+  "version": "0.5.2",
+  "build": 29,
   "importance": "standard",
   "channel": "stable",
   "items": [
-    "Fixed the What’s New window layout and positioning.",
-    "Restored readable spacing, bullets, and Done button styling."
+    "Simplified the installer with a crimson-to-black background.",
+    "Removed installer instructions and card panels for a cleaner window."
   ]
 }

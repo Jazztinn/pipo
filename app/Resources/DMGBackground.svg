@@ -1,26 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="660" height="420" viewBox="0 0 660 420">
   <defs>
-    <linearGradient id="canvas" x1="40" y1="0" x2="620" y2="420" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#21191D"/>
-      <stop offset="0.55" stop-color="#171418"/>
-      <stop offset="1" stop-color="#121114"/>
+    <linearGradient id="canvas" x1="0" y1="0" x2="660" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7A102A"/>
+      <stop offset="0.48" stop-color="#4A0A1A"/>
+      <stop offset="1" stop-color="#09070A"/>
     </linearGradient>
-    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FCF8F9"/>
-      <stop offset="1" stop-color="#EDE7E9"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(102 68) rotate(25) scale(300 210)" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#8C1830" stop-opacity="0.34"/>
-      <stop offset="1" stop-color="#8C1830" stop-opacity="0"/>
-    </radialGradient>
   </defs>
 
   <rect width="660" height="420" fill="url(#canvas)"/>
-  <rect width="660" height="420" fill="url(#glow)"/>
-
-  <text x="330" y="92" fill="#C9C2C5" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" text-anchor="middle">Drag Pipo to the Applications folder</text>
-
-  <rect x="90" y="128" width="200" height="208" rx="24" fill="url(#card)" stroke="#FFFFFF" stroke-opacity="0.72"/>
-  <rect x="370" y="128" width="200" height="208" rx="24" fill="url(#card)" stroke="#FFFFFF" stroke-opacity="0.72"/>
-
 </svg>

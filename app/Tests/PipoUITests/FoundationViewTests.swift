@@ -338,8 +338,8 @@ func updateDismissalIsSessionOnlyAndCriticalNoticePersists() throws {
 func bundledWhatsNewManifestHasConciseReleaseItems() throws {
     let url = try #require(PipoResources.url(forResource: "WhatsNew", withExtension: "json"))
     let manifest = try JSONDecoder().decode(PipoWhatsNew.self, from: Data(contentsOf: url))
-    #expect(manifest.version == "0.5.1")
-    #expect(manifest.build == 28)
+    #expect(manifest.version == "0.5.2")
+    #expect(manifest.build == 29)
     #expect(manifest.isValid)
 }
 
