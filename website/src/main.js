@@ -102,27 +102,28 @@ if ("scrollRestoration" in history) {
 }
 window.scrollTo({ top: 0, left: 0, behavior: "auto" });
 
-function countVisit() {
-  const seedVisits = 50;
-  let visits = seedVisits;
-
+async function countVisit() {
   try {
-    const storedVisits = Number.parseInt(localStorage.getItem("pipo-visits") ?? "", 10);
-    if (sessionStorage.getItem("pipo-visit-recorded")) {
-      visits = Number.isFinite(storedVisits) ? Math.max(seedVisits, storedVisits) : seedVisits;
-    } else {
-      visits = Number.isFinite(storedVisits) && storedVisits >= seedVisits
-        ? storedVisits + 1
-        : seedVisits;
-      localStorage.setItem("pipo-visits", String(visits));
-      sessionStorage.setItem("pipo-visit-recorded", "true");
+    const response = await fetch("/api/visits", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (!response.ok) throw new Error(`Visit counter request failed (${response.status})`);
+
+    const payload = await response.json();
+    if (!Number.isInteger(payload.visits) || payload.visits < 82) {
+      throw new Error("Visit counter returned invalid data");
+    }
+
+    if (visitNumber) visitNumber.textContent = payload.visits.toLocaleString();
+    if (visitCounter && !visitNumber) {
+      visitCounter.textContent = `Pipo has had ${payload.visits.toLocaleString()} visits`;
     }
   } catch {
-    visits = seedVisits;
+    // Keep server-rendered baseline visible when tracking is temporarily unavailable.
   }
-
-  if (visitNumber) visitNumber.textContent = visits.toLocaleString();
-  if (visitCounter && !visitNumber) visitCounter.textContent = `Pipo has had ${visits.toLocaleString()} visits`;
 }
 
 countVisit();
