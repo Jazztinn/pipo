@@ -1,6 +1,6 @@
 import { hasRedisConfiguration, redisPipeline } from "../lib/redis.js";
 
-const DOWNLOAD_TARGET = "/Pipo-0.5.3-universal.dmg";
+const DOWNLOAD_TARGET = "https://github.com/Jazztinn/pipo/releases/download/v0.5.3/Pipo-0.5.3-universal.dmg";
 const RELEASE_VERSION = "0.5.3";
 const TELEMETRY_TIMEOUT_MS = 450;
 

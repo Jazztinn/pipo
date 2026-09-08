@@ -54,7 +54,7 @@ test("download redirects when Redis telemetry stalls", async () => {
     const start = Date.now();
     await downloadHandler({ method: "GET" }, res);
     assert.equal(res.statusCode, 302);
-    assert.equal(res.location, "/Pipo-0.5.3-universal.dmg");
+    assert.equal(res.location, "https://github.com/Jazztinn/pipo/releases/download/v0.5.3/Pipo-0.5.3-universal.dmg");
     assert.ok(Date.now() - start < 650);
   } finally { globalThis.fetch = oldFetch; restore(); }
 });
