@@ -27,7 +27,7 @@ test("privacy policy discloses analytics and feedback delivery", () => {
 test("usage routes separate download starts from anonymous app activity", () => {
   assert.match(downloadApi, /pipo:downloads:total/);
   assert.match(downloadApi, /response\.redirect\(302, DOWNLOAD_TARGET\)/);
-  assert.match(usageApi, /pipo:usage:installs/);
+  assert.match(usageApi, /observed_last_30_days/);
   assert.match(usageApi, /pipo:usage:active:/);
   assert.match(usageApi, /createHmac\("sha256"/);
   assert.match(usageApi, /PIPO_STATS_TOKEN/);

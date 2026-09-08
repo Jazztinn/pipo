@@ -52,11 +52,16 @@ features or writes changes to Moodle.
 3. Launch Pipo and sign in with your LPU Cavite LMS account.
 4. Use the flag in the menu bar to open the dashboard.
 
-Official release artifacts are universal, Developer ID signed, notarized, and
-stapled before publication.
+Signing and notarization status is stated for each release. The workflow also
+supports explicitly disclosed unnotarized builds; check the selected release's
+notes and artifact metadata before installation.
 
 After installation, use **Settings → Updates → Check for updates**. Pipo can
 download approved releases without requiring another DMG installation.
+
+Usage tracking setup and metric definitions live in
+[`docs/usage-tracking.md`](docs/usage-tracking.md). App usage reporting is
+optional and can be disabled in **Settings → Advanced → Usage data**.
 
 ## How it works
 

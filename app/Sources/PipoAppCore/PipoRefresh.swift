@@ -45,7 +45,15 @@ public actor DashboardRefreshCoordinator {
     private let transport: any PipoSidecarTransport
     private let cache: any DashboardCache
     private var usedCachedResult = false
-    private var inFlight: [String: Task<DashboardRefreshOutcome, Error>] = [:]
+    private struct Flight {
+        let id: UUID
+        let task: Task<DashboardRefreshOutcome, Error>
+    }
+    private var inFlight: [String: Flight] = [:]
+    private var active: [UUID: Task<DashboardRefreshOutcome, Error>] = [:]
+    private var generation: UInt64 = 0
+    private var clearTask: Task<Void, Error>?
+    private var memorySnapshots: [String: DashboardSnapshot] = [:]
     private var refreshTail: Task<Void, Never>?
     private var latestMetrics: PipoRefreshMetrics?
 
@@ -59,36 +67,49 @@ public actor DashboardRefreshCoordinator {
     }
 
     public func refreshOutcome(token: String, force: Bool = false, settings: PipoSettings = PipoSettings(), sections: Set<String>? = nil, session: PipoSessionContext = PipoSessionContext()) async throws -> DashboardRefreshOutcome {
+        if let clearTask { try await clearTask.value }
+        try Task.checkCancellation()
+        let epoch = generation
         let sessionPrefix = "\(session.accountID)|\(session.generation)|"
         if sections != nil,
-           let fullTask = inFlight.first(where: { $0.key.hasPrefix(sessionPrefix) && $0.key.hasSuffix("|") })?.value
-        {
+           let fullTask = inFlight.first(where: { $0.key.hasPrefix(sessionPrefix) && $0.key.hasSuffix("|") })?.value.task {
             let result = try await fullTask.value
+            try checkGeneration(epoch)
             markLatestMetricsCoalesced()
             return DashboardRefreshOutcome(snapshot: result.snapshot, source: result.source, refreshedSections: result.refreshedSections, preservedSections: result.preservedSections, coalesced: true)
         }
         if sections == nil {
-            let sectionKeys = inFlight.keys.filter { $0.hasPrefix(sessionPrefix) && !$0.hasSuffix("|") }
-            for key in sectionKeys {
-                inFlight.removeValue(forKey: key)?.cancel()
+            for key in inFlight.keys.filter({ $0.hasPrefix(sessionPrefix) && !$0.hasSuffix("|") }) {
+                inFlight.removeValue(forKey: key)?.task.cancel()
             }
         }
         let key = "\(session.accountID)|\(session.generation)|\(force)|\((sections ?? []).sorted().joined(separator: ","))"
-        if let task = inFlight[key] {
-            let result = try await task.value
+        if let flight = inFlight[key] {
+            let result = try await flight.task.value
+            try checkGeneration(epoch)
             markLatestMetricsCoalesced()
             return DashboardRefreshOutcome(snapshot: result.snapshot, source: result.source, refreshedSections: result.refreshedSections, preservedSections: result.preservedSections, coalesced: true)
         }
         let predecessor = refreshTail
+        let id = UUID()
         let task = Task {
             if let predecessor { await predecessor.value }
-            try Task.checkCancellation()
-            return try await self.performRefresh(token: token, force: force, settings: settings, sections: sections, session: session)
+            try self.checkGeneration(epoch)
+            return try await self.performRefresh(token: token, force: force, settings: settings, sections: sections, session: session, epoch: epoch)
         }
         refreshTail = Task { _ = try? await task.value }
-        inFlight[key] = task
-        defer { inFlight[key] = nil }
+        inFlight[key] = Flight(id: id, task: task)
+        active[id] = task
+        defer {
+            active[id] = nil
+            if inFlight[key]?.id == id { inFlight[key] = nil }
+        }
         return try await task.value
+    }
+
+    private func checkGeneration(_ epoch: UInt64) throws {
+        try Task.checkCancellation()
+        guard generation == epoch else { throw CancellationError() }
     }
 
     public func metrics() -> PipoRefreshMetrics? { latestMetrics }
@@ -108,10 +129,11 @@ public actor DashboardRefreshCoordinator {
         })
     }
 
-    private func performRefresh(token: String, force: Bool, settings: PipoSettings, sections: Set<String>?, session: PipoSessionContext) async throws -> DashboardRefreshOutcome {
+    private func performRefresh(token: String, force: Bool, settings: PipoSettings, sections: Set<String>?, session: PipoSessionContext, epoch: UInt64) async throws -> DashboardRefreshOutcome {
         let started = ContinuousClock.now
         var requestedSections = sections
         if !force, requestedSections == nil, let snapshot = try await loadCache(for: session) {
+            try checkGeneration(epoch)
             let stale = sectionsNeedingRefresh(in: snapshot, settings: settings)
             if stale.isEmpty {
                 usedCachedResult = false
@@ -121,12 +143,21 @@ public actor DashboardRefreshCoordinator {
             requestedSections = stale
         }
         do {
-            let previous = try await loadCache(for: session)
-            var params: [String: PipoJSONValue] = ["token": .string(token)]
+            let previous: DashboardSnapshot?
+            if let memory = memorySnapshots[session.accountID] { previous = memory }
+            else { previous = try await loadCache(for: session) }
+            try checkGeneration(epoch)
+            let day = PipoSchoolClock.dayInterval()
+            var params: [String: PipoJSONValue] = [
+                "token": .string(token),
+                "day_start": .number(Int(day.start.timeIntervalSince1970)),
+                "day_end": .number(Int(day.end.timeIntervalSince1970))
+            ]
             if let requestedSections {
                 params["sections"] = .array(requestedSections.sorted().map(PipoJSONValue.string))
             }
             let response = try await transport.send(SidecarRequest(method: "refresh_dashboard", params: params))
+            try checkGeneration(epoch)
             guard let result = response.result else { throw PipoCoreError.invalidResponse }
             // Keep private LMS detail in memory for the signed-in UI. Persist only the
             // privacy projection so message bodies, feedback, and grades never enter cache.
@@ -135,17 +166,22 @@ public actor DashboardRefreshCoordinator {
             // Persist complete dashboard. New-assignment filtering is presentation-only;
             // caching filtered data loses assignments and breaks future diffs.
             let snapshot = merged.presentingNewAssignments(since: previous.map { Set($0.assignmentIDs) })
+            try checkGeneration(epoch)
             try await saveCache(merged.privacyProjected(), for: session)
+            try checkGeneration(epoch)
+            memorySnapshots[session.accountID] = merged
             usedCachedResult = false
             let requested = requestedSections ?? Set(Self.allSections)
             let preserved = Set(requested.filter { decoded.result(for: $0).status != .success })
             recordMetrics(snapshot, source: .network, started: started)
             return DashboardRefreshOutcome(snapshot: snapshot, source: .network, refreshedSections: requested.subtracting(preserved), preservedSections: preserved, coalesced: false)
         } catch {
+            try checkGeneration(epoch)
             if error is CancellationError || (error as? PipoCoreError) == .authenticationRequired {
                 throw error
             }
             if let cached = try await loadCache(for: session) {
+                try checkGeneration(epoch)
                 usedCachedResult = true
                 recordMetrics(cached, source: .staleCache, started: started)
                 return DashboardRefreshOutcome(snapshot: cached, source: .staleCache, refreshedSections: [], preservedSections: Set(Self.allSections), coalesced: false)
@@ -163,20 +199,38 @@ public actor DashboardRefreshCoordinator {
     }
 
     public func clearCache() async throws {
-        try await cache.delete()
+        if let clearTask { return try await clearTask.value }
+        generation &+= 1
+        let tasks = Array(active.values)
+        tasks.forEach { $0.cancel() }
+        inFlight.removeAll()
+        memorySnapshots.removeAll()
+        let task = Task {
+            for task in tasks { _ = await task.result }
+            try await self.cache.delete()
+        }
+        clearTask = task
+        defer { clearTask = nil }
+        try await task.value
         usedCachedResult = false
-        cancelAll()
         latestMetrics = nil
+        refreshTail = nil
     }
 
-    public func cancelAll() {
-        inFlight.values.forEach { $0.cancel() }
+    public func cancelAll() async {
+        generation &+= 1
+        let tasks = Array(active.values)
+        tasks.forEach { $0.cancel() }
         inFlight.removeAll()
-        refreshTail?.cancel()
+        memorySnapshots.removeAll()
+        // Keep all superseded tasks until drained; dropping the tail alone does
+        // not cancel a write that is already suspended inside persistence.
+        for task in tasks { _ = await task.result }
         refreshTail = nil
     }
 
     private func loadCache(for session: PipoSessionContext) async throws -> DashboardSnapshot? {
+        if let snapshot = memorySnapshots[session.accountID] { return snapshot }
         if let scoped = cache as? any AccountScopedDashboardCache { return try await scoped.load(accountID: session.accountID) }
         return try await cache.load()
     }
@@ -193,7 +247,17 @@ public actor DashboardRefreshCoordinator {
             guard requested.contains(section) else { return old }
             switch refreshed.result(for: section).status {
             case .success: return new
-            case .partial: return DashboardItem.deduplicated(new + old)
+            case .partial:
+                // Partial results cannot prove deletion. Bound retained history
+                // while preserving returned rows and recent cached records.
+                let cutoff = Date().addingTimeInterval(-30 * 24 * 60 * 60)
+                let retained = old.filter { item in
+                    guard let timestamp = item.timestamp,
+                          let date = ISO8601DateFormatter().date(from: timestamp) else { return true }
+                    return date >= cutoff
+                }
+                return Array(DashboardItem.deduplicated(new + retained).prefix(500))
+            case .unsupported: return []
             default: return old
             }
         }
@@ -204,8 +268,6 @@ public actor DashboardRefreshCoordinator {
             messages: items("messages", cached.sections.messages, refreshed.sections.messages),
             gradeFeedback: items("grades", cached.sections.gradeFeedback, refreshed.sections.gradeFeedback)
         )
-        let nextUpChanged = ["due_soon", "assignments", "schedule", "announcements"].contains { requested.contains($0) && [.success, .partial].contains(refreshed.result(for: $0).status) }
-        let nextUp = nextUpChanged ? DashboardItem.deduplicated(refreshed.nextUp + cached.nextUp) : cached.nextUp
         let schedule = items("schedule", cached.schedule, refreshed.schedule)
         let announcements = items("announcements", cached.announcements, refreshed.announcements)
         let resources = items("resources", cached.resources, refreshed.resources)
@@ -215,26 +277,36 @@ public actor DashboardRefreshCoordinator {
                 timestamps[section] = timestamp
             }
         }
-        let failures = refreshed.failures + cached.failures.filter { failure in
-            !requested.contains { failure.localizedCaseInsensitiveContains($0.replacingOccurrences(of: "_", with: " ")) }
+        var results = cached.sectionResults
+        for section in requested {
+            let result = refreshed.result(for: section)
+            if result.status != .notRequested { results[section] = result }
         }
-        let cachedCourses = Dictionary(uniqueKeysWithValues: cached.courses.map { ($0.id, $0) })
-        let courses = refreshed.courses.isEmpty ? cached.courses : refreshed.courses.map { course in
+        let failures = results.sorted(by: { $0.key < $1.key }).compactMap { section, result -> String? in
+            guard result.status == .failed || result.status == .partial else { return nil }
+            return result.error ?? "\(section): data is incomplete."
+        }
+        let cachedCourses = Dictionary(cached.courses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let courses = refreshed.courses.map { course in
             guard let cachedCourse = cachedCourses[course.id] else { return course }
+            let total: String?
+            if has("grades") { total = course.publishedTotal }
+            else if requested.contains("grades"), refreshed.result(for: "grades").status == .partial {
+                total = course.publishedTotal ?? cachedCourse.publishedTotal
+            } else { total = cachedCourse.publishedTotal }
             return Course(
                 id: course.id,
                 name: course.name,
                 shortName: course.shortName ?? cachedCourse.shortName,
                 instructor: course.instructor ?? cachedCourse.instructor,
-                publishedTotal: has("grades") ? course.publishedTotal : cachedCourse.publishedTotal,
+                publishedTotal: total,
                 upcomingCount: has("due_soon") ? course.upcomingCount : cachedCourse.upcomingCount
             )
         }
-        let results = cached.sectionResults.merging(refreshed.sectionResults) { _, new in new }
-        let assignmentIDs = refreshed.result(for: "assignments").status == .partial
+        let assignmentIDs = requested.contains("assignments") && refreshed.result(for: "assignments").status == .partial
             ? Array(Set(refreshed.assignmentIDs + cached.assignmentIDs)).sorted()
             : has("assignments") ? refreshed.assignmentIDs : cached.assignmentIDs
-        return DashboardSnapshot(version: max(refreshed.version, 3), generatedAt: refreshed.generatedAt, siteName: refreshed.siteName, studentName: refreshed.studentName, sections: sections, supported: refreshed.supported, assignmentIDs: assignmentIDs, courses: courses, failures: failures, nextUp: nextUp, schedule: schedule, announcements: announcements, resources: resources, sectionTimestamps: timestamps, sectionResults: results, syncDiagnostics: refreshed.syncDiagnostics)
+        return DashboardSnapshot(version: max(refreshed.version, 3), generatedAt: refreshed.generatedAt, siteName: refreshed.siteName, studentName: refreshed.studentName, sections: sections, supported: refreshed.supported, assignmentIDs: assignmentIDs, courses: courses, failures: failures, nextUp: [], schedule: schedule, announcements: announcements, resources: resources, sectionTimestamps: timestamps, sectionResults: results, syncDiagnostics: refreshed.syncDiagnostics)
     }
 
     private func recordMetrics(_ snapshot: DashboardSnapshot, source: PipoRefreshSource, started: ContinuousClock.Instant) {
@@ -259,7 +331,7 @@ public actor DashboardRefreshCoordinator {
         )
     }
 
-    private static let allSections = ["due_soon", "notifications", "assignments", "messages", "grades", "schedule", "announcements", "resources"]
+    private static let allSections = PipoSectionID.allCases.map(\.rawValue)
 }
 
 public actor InMemoryDashboardCache: DashboardCache {

@@ -537,7 +537,7 @@ public struct PipoUIConfiguration {
             viewUpdate: installUpdate,
             dismissUpdate: { updatePresentation?.dismissUpdate() },
             dismissWhatsNew: { updatePresentation?.dismissWhatsNew() },
-            clearCache: { await model.clearCache() },
+            clearCache: { try await model.clearCache().requireSuccess() },
             exportDiagnostics: { Self.exportDiagnostics(model) },
             addToCalendar: { entry in
                 let item = DashboardItem(

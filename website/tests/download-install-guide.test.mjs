@@ -6,11 +6,11 @@ const root = new URL("../", import.meta.url);
 
 test("desktop download links fetch the DMG and expose installation guide", async () => {
   const html = await readFile(new URL("index.html", root), "utf8");
-  const links = [...html.matchAll(/<a[^>]+href="\/Pipo-0\.5\.2-universal\.dmg"[^>]*>/g)];
+  const links = [...html.matchAll(/<a[^>]+href="\/api\/download"[^>]*>/g)];
 
   assert.equal(links.length, 3);
   links.forEach(([link]) => {
-    assert.match(link, /download="Pipo-0\.5\.2-universal\.dmg"/);
+    assert.match(link, /download="Pipo-0\.5\.3-universal\.dmg"/);
     assert.match(link, /data-download-guide/);
   });
 

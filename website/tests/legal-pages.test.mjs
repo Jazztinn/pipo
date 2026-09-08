@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const websiteRoot = resolve(import.meta.dirname, "..");
-const effectiveDate = "August 23, 2026";
+const effectiveDate = "August 31, 2026";
 
 for (const [file, title, canonical, counterpart] of [
   ["terms.html", "Terms of Use — Pipo", "https://pipo.jazztinn.me/terms.html", "./privacy.html"],
@@ -17,7 +17,7 @@ for (const [file, title, canonical, counterpart] of [
     assert.match(html, new RegExp(`Effective ${effectiveDate}`));
     assert.match(html, new RegExp(`href="${counterpart.replace(".", "\\.")}"`));
     assert.match(html, /href="\.\/index\.html"/);
-    assert.match(html, /href="\.\/Pipo-0\.5\.1-universal\.dmg" download="Pipo-0\.5\.1-universal\.dmg" data-pipo-download/);
+    assert.match(html, /href="\/api\/download" download="Pipo-0\.5\.3-universal\.dmg" data-pipo-download/);
   });
 }
 

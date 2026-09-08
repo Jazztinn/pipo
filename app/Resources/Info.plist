@@ -7,7 +7,7 @@
     <key>CFBundleExecutable</key>
     <string>PipoApp</string>
     <key>CFBundleIconFile</key>
-    <string>PipoIcon.png</string>
+    <string>PipoIcon.icns</string>
     <key>CFBundleIdentifier</key>
     <string>com.jazztinn.pipo</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -17,9 +17,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.5.2</string>
+    <string>0.5.3</string>
     <key>CFBundleVersion</key>
-    <string>29</string>
+    <string>30</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHumanReadableCopyright</key>
@@ -32,6 +32,8 @@
     <string>https://raw.githubusercontent.com/Jazztinn/pipo/main/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>8kvbucAz83Uny7Xwxg6FNxEQZdoaHY0RltHf7u1tAC4=</string>
+    <key>PipoUsageEndpoint</key>
+    <string>https://pipo.jazztinn.me/api/usage</string>
     <key>SUAllowsAutomaticUpdates</key>
     <true/>
 </dict>

@@ -67,9 +67,25 @@
     if (count > 0) return Object.freeze({ kind: 'content', text: '', retry: false });
     const normalized = String(status || 'ready').toLowerCase();
     if (normalized === 'loading') return Object.freeze({ kind: 'loading', text: `Loading ${title.toLowerCase()}…`, retry: false });
+    if (['partial', 'truncated'].includes(normalized)) return Object.freeze({ kind: 'warning', text: `${title} are incomplete. Retry to load remaining items.`, retry: true });
+    if (normalized === 'stale') return Object.freeze({ kind: 'warning', text: `No recent ${title.toLowerCase()} are available.`, retry: true });
+    if (normalized === 'unsupported') return Object.freeze({ kind: 'unsupported', text: `${title} are unavailable for this account.`, retry: false });
+    if (['authenticationrequired', 'authentication_required', 'auth_required'].includes(normalized)) return Object.freeze({ kind: 'error', text: `Sign in again to load ${title.toLowerCase()}.`, retry: false });
     if (['failed', 'error', 'partialfailure', 'partial_failure'].includes(normalized)) return Object.freeze({ kind: 'error', text: `${title} could not load.`, retry: true });
     return Object.freeze({ kind: 'empty', text: `No ${title.toLowerCase()}`, retry: false });
   }
 
-  global.pipoMenuHelpers = Object.freeze({ chooseGreeting, greetingPeriod, greetingsForHour, instructorFor, instructorFromCourseTitle, safeDisplay, gradeDisplay, sectionPresentation });
+  function activityCategory(item, fallback = '') {
+    const kind = String(item?.kind || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const aliases = { assignment: 'assignment', assignments: 'assignment', announcement: 'announcement', announcements: 'announcement', resource: 'resource', resources: 'resource', message: 'message', messages: 'message', grade: 'grade', grades: 'grade', feedback: 'grade', notification: 'notification', notifications: 'notification', activity: 'activity' };
+    return aliases[kind] || String(fallback || '').toLowerCase();
+  }
+
+  function contextActions(item, type, pinned = false) {
+    if (['imported_class', 'imported_subject'].includes(item?.kind)) return [{ action: 'editSchedule', label: 'Edit schedule' }, { action: 'copyDetails', label: 'Copy details' }];
+    if (type === 'course') return [{ action: 'openDestination', label: 'Open LMS' }, { action: 'copyDetails', label: 'Copy details' }, { action: pinned ? 'unpinCourse' : 'pinCourse', label: pinned ? 'Unpin course' : 'Pin course' }, { action: 'hideCourse', label: 'Hide course' }];
+    return [{ action: 'openDestination', label: 'Open LMS' }, { action: 'copyDetails', label: 'Copy details' }, { action: 'markSeen', label: 'Mark as seen' }, { action: 'snooze', label: 'Snooze reminder' }, { action: 'addToCalendar', label: 'Add to Calendar' }];
+  }
+
+  global.pipoMenuHelpers = Object.freeze({ chooseGreeting, greetingPeriod, greetingsForHour, instructorFor, instructorFromCourseTitle, safeDisplay, gradeDisplay, sectionPresentation, activityCategory, contextActions });
 })(window);

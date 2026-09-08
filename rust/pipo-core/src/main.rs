@@ -2,7 +2,36 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pipo_core::{MoodleClient, PROTOCOL_VERSION, REQUEST_CAP_BYTES, Request, Response, handle};
-use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{self, AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+/// Reads one JSON line without allowing an unbounded allocation for hostile input.
+async fn read_line_limited<R: AsyncBufRead + Unpin>(
+    input: &mut R,
+    line: &mut Vec<u8>,
+) -> io::Result<Option<bool>> {
+    let mut overflow = false;
+    loop {
+        let buffer = input.fill_buf().await?;
+        if buffer.is_empty() {
+            return Ok((!line.is_empty() || overflow).then_some(overflow));
+        }
+        let consumed = buffer
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|position| position + 1)
+            .unwrap_or(buffer.len());
+        if !overflow && line.len().saturating_add(consumed) <= REQUEST_CAP_BYTES {
+            line.extend_from_slice(&buffer[..consumed]);
+        } else {
+            overflow = true;
+        }
+        let complete = buffer[..consumed].last() == Some(&b'\n');
+        input.consume(consumed);
+        if complete {
+            return Ok(Some(overflow));
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -20,14 +49,12 @@ async fn main() {
     let mut output = io::stdout();
     loop {
         let mut line = Vec::new();
-        let bytes_read = match input.read_until(b'\n', &mut line).await {
-            Ok(bytes_read) => bytes_read,
+        let overflow = match read_line_limited(&mut input, &mut line).await {
+            Ok(Some(overflow)) => overflow,
+            Ok(None) => break,
             Err(_) => break,
         };
-        if bytes_read == 0 {
-            break;
-        }
-        let response = if line.len() > REQUEST_CAP_BYTES {
+        let response = if overflow {
             Response {
                 version: PROTOCOL_VERSION,
                 id: String::new(),
@@ -42,7 +69,7 @@ async fn main() {
                 Ok(request) => {
                     let id = request.id.clone();
                     let timeout = match &request.method {
-                        pipo_core::Method::RefreshDashboard => Duration::from_secs(45),
+                        pipo_core::Method::RefreshDashboard => Duration::from_secs(50),
                         pipo_core::Method::LoadCourse => Duration::from_secs(30),
                         _ => Duration::from_secs(25),
                     };

@@ -4,7 +4,7 @@ Pipo measures three different things:
 
 - `website visits`: homepage visits recorded in a shared Redis counter across Pipo domains and devices. The counter starts from the existing baseline of 82 and survives website deployments. It stores only the aggregate total.
 - `download starts`: website requests that reach `/api/download`. This counts a request before the DMG is served; it does not prove a completed download or installation.
-- `active use`: Pipo app launches and 15-minute heartbeats from enabled installations. The server stores HMAC-hashed random install IDs in daily Redis sets.
+- `active use`: Pipo app launches and 15-minute heartbeats from enabled installations. Server stores HMAC-hashed random install IDs in daily Redis sets for 31 days.
 
 No LMS content, account identity, tokens, grades, messages, student IDs, IP addresses, or user-agent values are sent in the app event payload. Users can disable future app events in **Settings → Advanced → Usage data**.
 
@@ -17,6 +17,7 @@ UPSTASH_REDIS_REST_URL=...
 UPSTASH_REDIS_REST_TOKEN=...
 PIPO_USAGE_SALT=long-random-secret
 PIPO_STATS_TOKEN=long-random-report-token
+PIPO_ABUSE_SALT=separate-long-random-secret
 ```
 
 Redeploy website after setting variables. Keep `PIPO_USAGE_SALT` and `PIPO_STATS_TOKEN` private. Missing Redis configuration does not block the DMG redirect, but website visits and app usage counters will not persist.
@@ -33,4 +34,4 @@ Update `DOWNLOAD_TARGET` and `RELEASE_VERSION` in `website/api/download.js` when
 
 ## Metric limits
 
-Counts are directional. Download starts can include repeat clicks, failed transfers, bots, and retries. Active use represents installs that report successfully; offline launches and users with reporting disabled are absent. Redis daily active sets expire after 370 days; all-time install count does not expire.
+Counts are directional. Download starts can include repeat clicks, failed transfers, bots, and retries. Active use represents installations that report successfully; offline launches and users with reporting disabled are absent. “Observed installs” and `active_by_version` both cover trailing 30 UTC days, using accepted release versions only. Daily hashed memberships and version keys expire after 31 days; Pipo keeps no raw install ID, IP address, or permanent install membership.

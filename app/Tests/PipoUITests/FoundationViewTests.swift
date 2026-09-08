@@ -329,7 +329,7 @@ func updateDismissalIsSessionOnlyAndCriticalNoticePersists() throws {
     presentation.dismissUpdate()
     #expect(presentation.updateNotice?.severity == .critical)
     presentation.clearUpdateNotice()
-    presentation.presentUpdate(version: "0.5.2", build: "29", critical: false)
+    presentation.presentUpdate(version: "0.5.3", build: "30", critical: false)
     #expect(presentation.updateNotice?.severity == .critical)
 }
 
@@ -338,8 +338,8 @@ func updateDismissalIsSessionOnlyAndCriticalNoticePersists() throws {
 func bundledWhatsNewManifestHasConciseReleaseItems() throws {
     let url = try #require(PipoResources.url(forResource: "WhatsNew", withExtension: "json"))
     let manifest = try JSONDecoder().decode(PipoWhatsNew.self, from: Data(contentsOf: url))
-    #expect(manifest.version == "0.5.2")
-    #expect(manifest.build == 29)
+    #expect(manifest.version == "0.5.3")
+    #expect(manifest.build == 30)
     #expect(manifest.isValid)
 }
 

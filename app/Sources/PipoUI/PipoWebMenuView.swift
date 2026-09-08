@@ -11,6 +11,7 @@ public enum PipoWebMenuHostMode: String, Codable, Sendable {
 struct PipoWebMenuItemV2: Codable, Sendable {
     let id, entityKey, kind, title: String
     let courseID, courseKey, courseName, instructor, timestampISO: String?
+    let endTimestampISO: String?
     let sourceLabel, presentationLabel: String
     let isUnread: Bool
     let destinationAvailable: Bool
@@ -18,7 +19,8 @@ struct PipoWebMenuItemV2: Codable, Sendable {
     let detailStatus: String
     let submissionStatus, resourceKind, section: String?
 
-    init(_ item: DashboardItem, cached: Bool, courseInstructor: String? = nil) {
+    init(_ item: DashboardItem, cached: Bool, courseInstructor: String? = nil, endTimestampISO: String? = nil) {
+        self.endTimestampISO = endTimestampISO
         id = item.id; entityKey = item.entityKey; kind = item.kind; title = item.title
         courseID = item.courseID.map(String.init); courseKey = item.courseID.map { "course:\($0)" }; courseName = item.courseName.isEmpty ? nil : item.courseName
         instructor = item.instructor ?? courseInstructor
@@ -49,11 +51,13 @@ struct PipoWebMenuSectionStatusV2: Codable, Sendable {
     let availableCount: Int?
     let errorCode: String?
     let retryAfterSeconds: Int?
+    let fetchedAt: String?
 }
 
 struct PipoWebMenuStateV2: Codable, Sendable {
     let version: Int
     let revision: Int
+    let accountID: String
     let phase: String
     let errorMessage: String?
     let studentName: String
@@ -64,12 +68,17 @@ struct PipoWebMenuStateV2: Codable, Sendable {
     let dataSource: String
     let sectionStatuses: [String: PipoWebMenuSectionStatusV2]
     let nextUp, schedule, dueSoon, newAssignments, notifications, messages, gradeFeedback, announcements, resources: [PipoWebMenuItemV2]
+    let importedSchedule: [PipoWebMenuItemV2]
+    let scheduleSearchItems: [PipoWebMenuItemV2]
+    let scheduleAvailability: Bool
+    let scheduleImportAvailability: Bool
     let courses: [PipoWebMenuCourseV2]
     let failures: [String]
     let supported: DashboardSectionSupport?
     let settings: Settings
     let localState: LocalState
     let secureStorage: String
+    let persistenceAvailable: Bool
     let calendarAuthorization: String
     let appVersion: String
     let updateChannel: String
@@ -137,6 +146,7 @@ enum JSONValue: Codable, Sendable {
 
     var stringValue: String? { if case .string(let value) = self { value } else { nil } }
     var boolValue: Bool? { if case .bool(let value) = self { value } else { nil } }
+    var arrayValue: [JSONValue]? { if case .array(let value) = self { value } else { nil } }
     var intValue: Int? {
         guard case .number(let value) = self, value.rounded() == value else { return nil }
         return Int(value)
@@ -244,6 +254,8 @@ struct PipoWebMenuView: NSViewRepresentable {
         private var selectedTab: String
         private var windowObserver: NSObjectProtocol?
         private var bridgeReloadAttempted = false
+        private var clockTask: Task<Void, Never>?
+        private var clockObservers: [NSObjectProtocol] = []
 
         init(model: PipoModel, configuration: PipoUIConfiguration, hostMode: PipoWebMenuHostMode, onSignOut: @escaping () -> Void, onDismissMenu: @escaping () -> Void, onInspectorVisibilityChanged: @escaping (Bool) -> Void) {
             self.model = model
@@ -292,6 +304,10 @@ struct PipoWebMenuView: NSViewRepresentable {
         func close() {
             isClosed = true
             initialRefreshTask?.cancel()
+            clockTask?.cancel()
+            clockTask = nil
+            for observer in clockObservers { NotificationCenter.default.removeObserver(observer) }
+            clockObservers.removeAll()
             if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) }
             windowObserver = nil
         }
@@ -299,6 +315,7 @@ struct PipoWebMenuView: NSViewRepresentable {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "pipo", let data = try? JSONSerialization.data(withJSONObject: message.body), let request = try? JSONDecoder().decode(PipoWebMenuRequestV1.self, from: data), request.version == 1, !request.requestID.isEmpty else { return }
             if request.action == "ui.ready" {
+                startLocalClock()
                 ready = true
                 pushState()
                 refreshMissingInitialSnapshot()
@@ -315,16 +332,26 @@ struct PipoWebMenuView: NSViewRepresentable {
         private func perform(_ request: PipoWebMenuRequestV1) async {
             guard !isClosed else { return }
             let payload = request.payload ?? [:]
+            let session = model.sessionContext
             do {
                 var responseData: JSONValue?
                 var responseTargetID: String?
                 switch request.action {
                 case "signOut": onSignOut()
+                case "editSchedule":
+                    guard model.scheduleEnabled else { throw BridgeError.unsupported }
+                    NotificationCenter.default.post(name: Notification.Name("com.jazztinn.pipo.open-schedule"), object: nil)
+                    onDismissMenu()
                 case "dismissMenu": onDismissMenu()
-                case "refresh": await model.refresh(force: true)
+                case "refresh": try await model.refresh(force: true).requireSuccess()
                 case "refreshSection":
-                    guard let section = payload["section"]?.stringValue, Self.sections.contains(section) else { throw BridgeError.invalid }
-                    await model.refresh(force: true, sections: [section])
+                    let rawTargets = payload["sections"]?.arrayValue ?? payload["section"].map { [$0] } ?? []
+                    let targets = try rawTargets.compactMap { $0.stringValue }.reduce(into: Set<PipoSectionID>()) { result, key in
+                        guard let mapped = PipoSectionID.refreshTargets(for: key) else { throw BridgeError.invalid }
+                        result.formUnion(mapped)
+                    }
+                    guard !targets.isEmpty, rawTargets.count == rawTargets.compactMap({ $0.stringValue }).count else { throw BridgeError.invalid }
+                    try await model.refresh(force: true, sections: Set(targets.map(\.rawValue))).requireSuccess()
                 case "selectTab":
                     guard let raw = payload["tab"]?.stringValue, let tab = PipoAppCore.PipoTab(rawValue: raw == "today" ? "dashboard" : raw) else { throw BridgeError.invalid }
                     selectedTab = tab == .dashboard ? "today" : tab.rawValue
@@ -333,19 +360,19 @@ struct PipoWebMenuView: NSViewRepresentable {
                     guard let courseID = validCourseID(payload) else { throw BridgeError.invalid }
                     responseTargetID = String(courseID)
                     responseData = try Self.jsonValue(from: await model.loadCourse(id: courseID))
-                case "markSeen": guard let item = validItem(payload) else { throw BridgeError.invalid }; await model.markSeen(item.id)
-                case "undoSeen": guard let item = validItem(payload) else { throw BridgeError.invalid }; await model.undoSeen(item.id)
+                case "markSeen": guard let item = validItem(payload) else { throw BridgeError.invalid }; try await model.markSeen(item.id).requireSuccess()
+                case "undoSeen": guard let item = validItem(payload) else { throw BridgeError.invalid }; try await model.undoSeen(item.id).requireSuccess()
                 case "snooze":
                     guard let item = validItem(payload) else { throw BridgeError.invalid }
                     let seconds = payload["seconds"]?.intValue.map { min(max($0, 300), 604_800) } ?? 3_600
-                    await model.snooze(item.id, until: .now.addingTimeInterval(TimeInterval(seconds)))
+                    try await model.snooze(item.id, until: .now.addingTimeInterval(TimeInterval(seconds))).requireSuccess()
                 case "openDestination":
                     if let item = validItem(payload) {
-                        await model.openURL(for: item)
+                        try await model.openURL(for: item).requireSuccess()
                     } else if payload["lmsRoot"]?.boolValue == true {
-                        configuration.openURL(PipoFoundation.lmsOrigin)
+                        try model.openTrustedDestination(PipoFoundation.lmsOrigin.absoluteString).requireSuccess()
                     } else if let courseID = validCourseID(payload) {
-                        configuration.openURL(try await model.courseDestination(id: courseID))
+                        try model.openTrustedDestination(try await model.courseDestination(id: courseID).absoluteString).requireSuccess()
                     } else {
                         throw BridgeError.invalid
                     }
@@ -359,17 +386,18 @@ struct PipoWebMenuView: NSViewRepresentable {
                         throw BridgeError.invalid
                     }
                 case "addToCalendar": guard let item = validItem(payload) else { throw BridgeError.invalid }; try await model.addToCalendar(item)
-                case "requestCalendarAccess": _ = try await model.requestCalendarAccess()
+                case "requestCalendarAccess":
+                    guard try await model.requestCalendarAccess() else { throw PipoCoreError.operationFailed("Calendar access was denied.") }
                 case "pinCourse", "unpinCourse", "hideCourse", "restoreCourse":
                     guard let courseID = validCourseID(payload, includingHidden: request.action == "restoreCourse") else { throw BridgeError.invalid }
-                    if request.action == "pinCourse" || request.action == "unpinCourse" { await model.setPinnedCourse(courseID, pinned: request.action == "pinCourse") }
-                    else { await model.setHiddenCourse(courseID, hidden: request.action == "hideCourse") }
+                    if request.action == "pinCourse" || request.action == "unpinCourse" { try await model.setPinnedCourse(courseID, pinned: request.action == "pinCourse").requireSuccess() }
+                    else { try await model.setHiddenCourse(courseID, hidden: request.action == "hideCourse").requireSuccess() }
                 case "updateSettings": applySettings(payload)
                 case "updateChannel":
                     guard let channel = payload["channel"]?.stringValue, ["stable", "beta"].contains(channel) else { throw BridgeError.invalid }
                     UserDefaults.standard.set(channel, forKey: "pipo.updates.channel")
                     NotificationCenter.default.post(name: Notification.Name("com.jazztinn.pipo.update-channel-changed"), object: nil)
-                case "clearCache": await model.clearCache()
+                case "clearCache": try await model.clearCache().requireSuccess()
                 case "checkForUpdates": guard let action = configuration.installUpdate else { throw BridgeError.unsupported }; action()
                 case "viewUpdate": guard let action = configuration.viewUpdate else { throw BridgeError.unsupported }; action()
                 case "dismissUpdate": configuration.dismissUpdate()
@@ -381,12 +409,15 @@ struct PipoWebMenuView: NSViewRepresentable {
                     resizeMenuBarWindowForInspector(visible)
                 default: throw BridgeError.unsupported
                 }
+                guard session == model.sessionContext || ["clearCache", "signOut"].contains(request.action) else { throw CancellationError() }
                 pushState()
                 respond(request.requestID, success: true, data: responseData, targetID: responseTargetID)
+            } catch is CancellationError {
+                respond(request.requestID, success: false, error: "Action cancelled.")
             } catch BridgeError.unsupported {
                 respond(request.requestID, success: false, error: "This action is unavailable.")
             } catch {
-                respond(request.requestID, success: false, error: "Pipo could not complete that action.")
+                respond(request.requestID, success: false, error: PipoSecrets.redact(error.localizedDescription))
             }
         }
 
@@ -411,7 +442,7 @@ struct PipoWebMenuView: NSViewRepresentable {
 
         private func validItem(_ payload: [String: JSONValue]) -> DashboardItem? {
             guard let itemID = payload["itemID"]?.stringValue else { return nil }
-            return allItems.first { $0.id == itemID }
+            return model.dashboardItem(id: itemID) ?? (model.scheduleEnabled ? (model.scheduleController.items() + model.scheduleController.searchItems()).first { $0.id == itemID } : nil)
         }
 
         private func validCourseID(_ payload: [String: JSONValue], includingHidden: Bool = false) -> Int? {
@@ -426,7 +457,6 @@ struct PipoWebMenuView: NSViewRepresentable {
             return snapshot.sections.dueSoon + snapshot.sections.newAssignments + snapshot.sections.notifications + snapshot.sections.messages + snapshot.sections.gradeFeedback + snapshot.nextUp + snapshot.schedule + snapshot.announcements + snapshot.resources
         }
 
-        private static let sections: Set<String> = ["due_soon", "notifications", "assignments", "messages", "grades", "schedule", "announcements", "resources"]
         private static let revisionSensitiveActions: Set<String> = ["loadCourse", "markSeen", "undoSeen", "snooze", "openDestination", "copyDetails", "addToCalendar", "pinCourse", "unpinCourse", "hideCourse", "restoreCourse"]
         private enum BridgeError: Error { case invalid, unsupported }
 
@@ -441,6 +471,9 @@ struct PipoWebMenuView: NSViewRepresentable {
                 _ = model.settings
                 _ = model.localState
                 _ = model.secureStorageStatus
+                _ = model.persistenceStatus
+                _ = model.scheduleController.confirmed
+                _ = model.scheduleController.error
                 _ = configuration.updatePresentation?.updateNotice
                 _ = configuration.updatePresentation?.whatsNew
             } onChange: { [weak self] in
@@ -472,6 +505,23 @@ struct PipoWebMenuView: NSViewRepresentable {
             dispatch(event: "pipo-state", value: makeState(revision: revision))
         }
 
+        private func startLocalClock() {
+            guard clockTask == nil else { return }
+            clockTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    let delay = 60 - Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 60)
+                    try? await Task.sleep(for: .seconds(delay))
+                    guard let self, !self.isClosed, !Task.isCancelled else { return }
+                    self.pushStateIfReady()
+                }
+            }
+            for name in [Notification.Name.NSSystemTimeZoneDidChange, Notification.Name.NSCalendarDayChanged, NSApplication.didBecomeActiveNotification] {
+                clockObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    Task { @MainActor in self?.pushStateIfReady() }
+                })
+            }
+        }
+
         private func makeState(revision: Int) -> PipoWebMenuStateV2 {
             let snapshot = model.snapshot
             let modelPhase = Self.phaseDescription(model.phase)
@@ -495,10 +545,12 @@ struct PipoWebMenuView: NSViewRepresentable {
                 let courseInstructor = dashboardItem.courseID.flatMap { instructorsByID[$0] } ?? instructorsByName[nameKey]
                 return PipoWebMenuItemV2(dashboardItem, cached: cached, courseInstructor: courseInstructor)
             }
+            let classEndDates = model.scheduleController.todayEndDates()
             let statuses = Self.sectionStatuses(snapshot: snapshot, phase: phase.name, source: source)
             return PipoWebMenuStateV2(
                 version: 2,
                 revision: revision,
+                accountID: model.sessionContext.accountID,
                 phase: phase.name,
                 errorMessage: phase.error,
                 studentName: snapshot?.studentName ?? "",
@@ -510,7 +562,9 @@ struct PipoWebMenuView: NSViewRepresentable {
                 nextUp: (snapshot?.nextUp ?? []).map(item), schedule: (snapshot?.schedule ?? []).map(item), dueSoon: (snapshot?.sections.dueSoon ?? []).map(item),
                 newAssignments: (snapshot?.sections.newAssignments ?? []).map(item), notifications: (snapshot?.sections.notifications ?? []).map(item),
                 messages: (snapshot?.sections.messages ?? []).map(item), gradeFeedback: (snapshot?.sections.gradeFeedback ?? []).map(item),
-                announcements: (snapshot?.announcements ?? []).map(item), resources: (snapshot?.resources ?? []).map(item), courses: courses.map(PipoWebMenuCourseV2.init),
+                announcements: (snapshot?.announcements ?? []).map(item), resources: (snapshot?.resources ?? []).map(item),
+                importedSchedule: model.scheduleEnabled ? model.scheduleController.items().map { PipoWebMenuItemV2($0, cached: false, endTimestampISO: classEndDates[$0.id]) } : [], scheduleSearchItems: model.scheduleEnabled ? model.scheduleController.searchItems().map(item) : [], scheduleAvailability: model.scheduleEnabled && model.scheduleController.confirmed != nil, scheduleImportAvailability: model.scheduleEnabled,
+                courses: courses.map(PipoWebMenuCourseV2.init),
                 failures: snapshot?.failures ?? [], supported: snapshot?.supported,
                 settings: .init(
                     refreshMinutes: Int(settings.refreshInterval / 60), notificationsEnabled: settings.notificationsEnabled,
@@ -523,7 +577,7 @@ struct PipoWebMenuView: NSViewRepresentable {
                     seenIDs: model.localState.seenIDs.sorted(), snoozedIDs: model.localState.snoozedUntil.filter { $0.value > .now }.keys.sorted(),
                     pinnedCourseIDs: model.localState.pinnedCourseIDs.sorted().map(String.init), hiddenCourseIDs: model.localState.hiddenCourseIDs.sorted().map(String.init)
                 ),
-                secureStorage: String(describing: model.secureStorageStatus), calendarAuthorization: model.calendarAuthorizationDescription,
+                secureStorage: String(describing: model.secureStorageStatus), persistenceAvailable: model.persistenceStatus.canSave, calendarAuthorization: model.calendarAuthorizationDescription,
                 appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development",
                 updateChannel: UserDefaults.standard.string(forKey: "pipo.updates.channel") ?? "stable",
                 updateNotice: configuration.updatePresentation?.updateNotice,
@@ -552,7 +606,8 @@ struct PipoWebMenuView: NSViewRepresentable {
                     truncated: (resultKeys[key] ?? [key]).contains { snapshot?.result(for: $0).truncated == true },
                     availableCount: (resultKeys[key] ?? [key]).compactMap { snapshot?.result(for: $0).availableCount }.max(),
                     errorCode: (resultKeys[key] ?? [key]).compactMap { snapshot?.result(for: $0).errorCode }.first,
-                    retryAfterSeconds: (resultKeys[key] ?? [key]).compactMap { snapshot?.result(for: $0).retryAfterSeconds }.max()
+                    retryAfterSeconds: (resultKeys[key] ?? [key]).compactMap { snapshot?.result(for: $0).retryAfterSeconds }.max(),
+                    fetchedAt: (resultKeys[key] ?? [key]).compactMap { snapshot?.result(for: $0).fetchedAt }.max()
                 ))
             })
         }

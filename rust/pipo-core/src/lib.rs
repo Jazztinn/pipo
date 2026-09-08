@@ -17,12 +17,22 @@ use reqwest::{Client, redirect};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use thiserror::Error;
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use time::{
+    OffsetDateTime,
+    format_description::well_known::{Rfc2822, Rfc3339},
+};
 use url::Url;
+
+pub mod provider;
+pub use provider::{
+    Announcement, Assignment, CalendarEvent, Course, EntityID, Grade, LMSProvider, Message,
+    MoodleProvider, Resource,
+};
 
 pub const PROTOCOL_VERSION: u8 = 4;
 pub const SNAPSHOT_SCHEMA_VERSION: u8 = 3;
 pub const LMS_ORIGIN: &str = "https://lms.lpucavite.edu.ph";
+pub const DEFAULT_SCHOOL_ID: &str = "lpu-cavite";
 pub const REQUEST_CAP_BYTES: usize = 2 * 1024 * 1024;
 const RESPONSE_CAP_BYTES: usize = 2 * 1024 * 1024;
 const TOKEN_RESPONSE_CAP_BYTES: usize = 256 * 1024;
@@ -36,7 +46,10 @@ const COURSE_FETCH_CONCURRENCY: usize = 4;
 const CONTEXT_TTL: Duration = Duration::from_secs(15 * 60);
 const DASHBOARD_ATTEMPT_BUDGET: usize = 32;
 const LOAD_COURSE_ATTEMPT_BUDGET: usize = 12;
-const HEAVY_COURSE_LIMIT: usize = 12;
+// Reserve 12 assignment-status probes plus base and content work inside the
+// 32-attempt ceiling. Course index remains complete; heavy sections rotate.
+const HEAVY_COURSE_LIMIT: usize = 6;
+const ANNOUNCEMENT_FETCH_LIMIT: usize = 2;
 const SECTION_OUTPUT_TARGET_BYTES: usize = 192 * 1024;
 const DASHBOARD_OUTPUT_TARGET_BYTES: usize = 7 * 256 * 1024;
 const ACTIONABLE_ASSIGNMENT_WINDOW_SECS: i64 = 7 * 24 * 60 * 60;
@@ -62,7 +75,9 @@ fn dashboard_heavy_call_budget(
     forums: usize,
     actionable_assignments: usize,
 ) -> usize {
-    dashboard_core_call_budget(actionable_assignments) + (2 * courses) + forums
+    dashboard_core_call_budget(actionable_assignments)
+        + (2 * courses.min(HEAVY_COURSE_LIMIT))
+        + forums.min(ANNOUNCEMENT_FETCH_LIMIT)
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,6 +137,8 @@ pub enum CoreError {
     Unsupported(String),
     #[error("destination is outside the LPU LMS origin")]
     Origin,
+    #[error("access denied by LMS")]
+    AccessDenied,
 }
 
 impl CoreError {
@@ -129,6 +146,7 @@ impl CoreError {
         match self {
             Self::Input(_) | Self::Origin => "invalid_input",
             Self::Authentication(_) => "authentication_failed",
+            Self::AccessDenied => "access_denied",
             Self::Network(_) => "network_failed",
             Self::Timeout => "timeout",
             Self::RateLimited => "rate_limited",
@@ -155,6 +173,8 @@ pub struct MoodleClient {
     origin: Url,
     call_count: Arc<AtomicUsize>,
     retry_count: Arc<AtomicUsize>,
+    retry_after_seconds: Arc<Mutex<Option<u64>>>,
+    cooldown_until: Arc<Mutex<Option<std::time::Instant>>>,
     heavy_course_cursor: Arc<AtomicUsize>,
     context: Arc<Mutex<Option<CachedContext>>>,
     budget: Arc<Mutex<Option<OperationBudget>>>,
@@ -211,6 +231,8 @@ impl MoodleClient {
             origin,
             call_count: Arc::new(AtomicUsize::new(0)),
             retry_count: Arc::new(AtomicUsize::new(0)),
+            retry_after_seconds: Arc::new(Mutex::new(None)),
+            cooldown_until: Arc::new(Mutex::new(None)),
             heavy_course_cursor: Arc::new(AtomicUsize::new(0)),
             context: Arc::new(Mutex::new(None)),
             budget: Arc::new(Mutex::new(None)),
@@ -302,6 +324,10 @@ impl MoodleClient {
     fn begin_budget(&self, attempts: usize, timeout: Duration) {
         self.call_count.store(0, Ordering::Relaxed);
         self.retry_count.store(0, Ordering::Relaxed);
+        *self
+            .retry_after_seconds
+            .lock()
+            .expect("retry metadata lock") = None;
         *self.budget.lock().expect("budget lock") = Some(OperationBudget {
             remaining_attempts: attempts,
             deadline: std::time::Instant::now() + timeout,
@@ -318,6 +344,72 @@ impl MoodleClient {
         }
         self.call_count.fetch_add(1, Ordering::Relaxed);
         Ok(())
+    }
+
+    fn retry_after_seconds(&self) -> Option<u64> {
+        *self
+            .retry_after_seconds
+            .lock()
+            .expect("retry metadata lock")
+    }
+
+    fn record_cooldown(&self, delay: Option<Duration>) {
+        let Some(delay) = delay else { return };
+        let seconds = delay.as_secs().max(1);
+        let until = std::time::Instant::now() + delay;
+        let mut cooldown = self.cooldown_until.lock().expect("cooldown lock");
+        if cooldown.is_none_or(|current| current < until) {
+            *cooldown = Some(until);
+        }
+        let mut metadata = self
+            .retry_after_seconds
+            .lock()
+            .expect("retry metadata lock");
+        if metadata.is_none_or(|current| current < seconds) {
+            *metadata = Some(seconds);
+        }
+    }
+
+    async fn wait_for_cooldown(&self) -> Result<(), CoreError> {
+        let until = *self.cooldown_until.lock().expect("cooldown lock");
+        if let Some(until) = until
+            && let Some(delay) = until.checked_duration_since(std::time::Instant::now())
+        {
+            let deadline = self
+                .budget
+                .lock()
+                .expect("budget lock")
+                .as_ref()
+                .map(|budget| budget.deadline);
+            if deadline.is_some_and(|deadline| std::time::Instant::now() + delay >= deadline) {
+                return Err(CoreError::Timeout);
+            }
+            tokio::time::sleep(delay).await;
+        }
+        Ok(())
+    }
+
+    async fn send_form_with_remaining_budget(
+        &self,
+        endpoint: Url,
+        form: &[(String, String)],
+    ) -> Result<reqwest::Response, CoreError> {
+        let request = self.http.post(endpoint).form(form).send();
+        let deadline = self
+            .budget
+            .lock()
+            .expect("budget lock")
+            .as_ref()
+            .map(|budget| budget.deadline);
+        match deadline {
+            Some(deadline) => {
+                tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), request)
+                    .await
+                    .map_err(|_| CoreError::Timeout)?
+                    .map_err(CoreError::from)
+            }
+            None => request.await.map_err(CoreError::from),
+        }
     }
 
     fn cached_context(&self, token: &str) -> Option<(Value, Vec<Value>)> {
@@ -339,7 +431,10 @@ impl MoodleClient {
         });
     }
 
-    async fn context(&self, token: &str) -> Result<(Value, Vec<Value>), CoreError> {
+    pub(crate) async fn context_for_provider(
+        &self,
+        token: &str,
+    ) -> Result<(Value, Vec<Value>), CoreError> {
         if let Some(context) = self.cached_context(token) {
             return Ok(context);
         }
@@ -385,10 +480,12 @@ impl MoodleClient {
         &self,
         token: &str,
         requested_sections: Option<&[Value]>,
+        day_start: Option<i64>,
+        day_end: Option<i64>,
     ) -> Result<Value, CoreError> {
         self.begin_budget(DASHBOARD_ATTEMPT_BUDGET, Duration::from_secs(45));
         let requested = normalize_sections(requested_sections)?;
-        let (site, courses) = self.context(token).await?;
+        let (site, courses) = self.context_for_provider(token).await?;
         let user_id = site
             .get("userid")
             .and_then(Value::as_i64)
@@ -401,6 +498,12 @@ impl MoodleClient {
         let mut section_timestamps = Map::new();
         let now = unix_now();
         let wants_calendar = requested.contains("due_soon") || requested.contains("schedule");
+        let (day_start, day_end) = local_day_interval(day_start, day_end)?;
+        let calendar_from = if requested.contains("schedule") {
+            day_start
+        } else {
+            now
+        };
         let calendar_fetch = async {
             if !wants_calendar
                 || !capabilities.contains("core_calendar_get_action_events_by_timesort")
@@ -410,7 +513,7 @@ impl MoodleClient {
             Some(self.call(
                 token,
                 "core_calendar_get_action_events_by_timesort",
-                json!({ "timesortfrom": now, "timesortto": now + (7 * 24 * 60 * 60), "limitnum": CALENDAR_EVENT_LIMIT }),
+                json!({ "timesortfrom": calendar_from, "timesortto": (now + (7 * 24 * 60 * 60)).max(day_end), "limitnum": CALENDAR_EVENT_LIMIT }),
             ).await)
         };
         let notifications_fetch = async {
@@ -429,7 +532,7 @@ impl MoodleClient {
             )
         };
         let assignments_fetch = async {
-            if !requested.contains("assignments")
+            if !(requested.contains("assignments") || wants_calendar)
                 || !capabilities.contains("mod_assign_get_assignments")
             {
                 return None;
@@ -492,7 +595,7 @@ impl MoodleClient {
             .map(event_item)
             .collect::<Vec<_>>();
         backfill_course_names(&mut calendar_items, &courses);
-        let due_soon = if requested.contains("due_soon") {
+        let mut due_soon = if requested.contains("due_soon") {
             calendar_items
                 .clone()
                 .into_iter()
@@ -501,10 +604,16 @@ impl MoodleClient {
         } else {
             Vec::new()
         };
-        let schedule = if requested.contains("schedule") {
+        let mut schedule = if requested.contains("schedule") {
             calendar_items
                 .into_iter()
-                .filter(|item| timestamp_is_today(item.get("timestamp").and_then(Value::as_str)))
+                .filter(|item| {
+                    timestamp_in_interval(
+                        item.get("timestamp").and_then(Value::as_str),
+                        day_start,
+                        day_end,
+                    )
+                })
                 .map(|item| with_section(item, "schedule"))
                 .collect::<Vec<_>>()
         } else {
@@ -513,6 +622,7 @@ impl MoodleClient {
         let due_ids = due_soon
             .iter()
             .filter_map(|item| item.get("destination").and_then(Value::as_str))
+            .map(str::to_owned)
             .collect::<HashSet<_>>();
 
         let notifications = match notifications_result {
@@ -556,73 +666,6 @@ impl MoodleClient {
             .map(|item| with_section(item, "assignments"))
             .collect::<Vec<_>>();
         backfill_course_names(&mut assignment_items, &courses);
-        if requested.contains("assignments")
-            && capabilities.contains("mod_assign_get_submission_status")
-        {
-            let assignments_for_status = actionable_assignments(&assignment_items);
-            let status_results = stream::iter(assignments_for_status.into_iter().map(
-                |assignment| async move {
-                    let assign_id = assignment
-                        .get("id")
-                        .and_then(Value::as_i64)
-                        .unwrap_or_default();
-                    let result = if assign_id > 0 {
-                        self.call(
-                            token,
-                            "mod_assign_get_submission_status",
-                            json!({ "assignid": assign_id }),
-                        )
-                        .await
-                    } else {
-                        Err(CoreError::Response("assignment omitted id".to_owned()))
-                    };
-                    (assignment, result)
-                },
-            ))
-            .buffer_unordered(ASSIGNMENT_STATUS_CONCURRENCY)
-            .collect::<Vec<_>>()
-            .await;
-            let mut status_by_id = std::collections::HashMap::new();
-            for (assignment, result) in status_results {
-                let id = value_identifier(assignment.get("id").unwrap_or(&Value::Null));
-                match result {
-                    Ok(value) => {
-                        status_by_id.insert(id, submission_status(&value));
-                    }
-                    Err(error) => {
-                        failures.push(section_failure("Submission status", &error));
-                    }
-                }
-            }
-            for assignment in &mut assignment_items {
-                let id = value_identifier(assignment.get("id").unwrap_or(&Value::Null));
-                if let Some(status) = status_by_id.get(&id) {
-                    assignment
-                        .as_object_mut()
-                        .expect("assignment object")
-                        .insert(
-                            "submission_status".to_owned(),
-                            Value::String(status.clone()),
-                        );
-                }
-            }
-            section_timestamps.insert("submission_status".to_owned(), Value::String(rfc3339_now()));
-        }
-        let assignment_ids = assignment_items
-            .iter()
-            .filter_map(|item| item.get("id"))
-            .map(value_identifier)
-            .collect::<Vec<_>>();
-        let new_assignments = assignment_items
-            .into_iter()
-            .filter(|item| {
-                item.get("destination")
-                    .and_then(Value::as_str)
-                    .map(|destination| !due_ids.contains(destination))
-                    .unwrap_or(true)
-            })
-            .collect::<Vec<_>>();
-
         let messages = match messages_result {
             Some(Ok(value)) => {
                 section_timestamps.insert("messages".to_owned(), Value::String(rfc3339_now()));
@@ -648,7 +691,7 @@ impl MoodleClient {
             .collect::<Vec<_>>();
 
         let mut grade_feedback = Vec::new();
-        let mut courses_with_grades = Vec::new();
+        let mut grade_totals = std::collections::HashMap::new();
         if requested.contains("grades") && capabilities.contains("gradereport_user_get_grade_items")
         {
             let grade_results =
@@ -671,7 +714,6 @@ impl MoodleClient {
                     Ok(value) => value,
                     Err(error) => {
                         failures.push(section_failure("Grades", &error));
-                        courses_with_grades.push(course.clone());
                         continue;
                     }
                 };
@@ -681,15 +723,9 @@ impl MoodleClient {
                     .find(|item| item.get("is_total") == Some(&Value::Bool(true)))
                     .and_then(|item| item.get("published_total"))
                     .cloned()
+                    && let Some(course_id) = course.get("id").and_then(Value::as_i64)
                 {
-                    let mut with_total = course.clone();
-                    with_total
-                        .as_object_mut()
-                        .expect("course object")
-                        .insert("published_total".to_owned(), total);
-                    courses_with_grades.push(with_total);
-                } else {
-                    courses_with_grades.push(course.clone());
+                    grade_totals.insert(course_id, total);
                 }
                 grade_feedback.extend(
                     published
@@ -698,10 +734,10 @@ impl MoodleClient {
                 );
             }
             section_timestamps.insert("grades".to_owned(), Value::String(rfc3339_now()));
-        } else {
-            courses_with_grades = courses.clone();
         }
 
+        // Fetch base course content before optional submission-status fan-out. Status
+        // probes must never consume slots needed for resources or announcements.
         let (announcements, resources) = self
             .dashboard_content(
                 token,
@@ -712,17 +748,42 @@ impl MoodleClient {
                 &mut failures,
             )
             .await;
-        if requested.contains("announcements")
-            && capabilities.contains("mod_forum_get_forum_discussions_paginated")
-        {
+        if requested.contains("announcements") && forum_discussions_supported(&capabilities) {
             section_timestamps.insert("announcements".to_owned(), Value::String(rfc3339_now()));
         }
         if requested.contains("resources") && capabilities.contains("core_course_get_contents") {
             section_timestamps.insert("resources".to_owned(), Value::String(rfc3339_now()));
         }
 
-        let courses_with_counts = courses_with_grades
-            .into_iter()
+        if (requested.contains("assignments") || wants_calendar)
+            && !assignment_items.is_empty()
+            && capabilities.contains("mod_assign_get_submission_status")
+        {
+            self.apply_submission_statuses(token, &mut assignment_items, &mut failures)
+                .await;
+            merge_assignment_statuses(&assignment_items, &mut due_soon);
+            merge_assignment_statuses(&assignment_items, &mut schedule);
+            section_timestamps.insert("submission_status".to_owned(), Value::String(rfc3339_now()));
+        }
+        let assignment_ids = assignment_items
+            .iter()
+            .filter_map(|item| item.get("id"))
+            .map(value_identifier)
+            .collect::<Vec<_>>();
+        let new_assignments = assignment_items
+            .iter()
+            .filter(|item| {
+                item.get("destination")
+                    .and_then(Value::as_str)
+                    .map(|destination| !due_ids.contains(destination))
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let courses_with_counts = courses
+            .iter()
+            .cloned()
             .map(|mut course| {
                 let course_id = course.get("id").and_then(Value::as_i64);
                 let count = due_soon
@@ -733,6 +794,12 @@ impl MoodleClient {
                     .as_object_mut()
                     .expect("course object")
                     .insert("upcoming_count".to_owned(), json!(count));
+                if let Some(total) = course_id.and_then(|id| grade_totals.get(&id)).cloned() {
+                    course
+                        .as_object_mut()
+                        .expect("course object")
+                        .insert("published_total".to_owned(), total);
+                }
                 course
             })
             .collect::<Vec<_>>();
@@ -771,7 +838,7 @@ impl MoodleClient {
                 }
             }
         }
-        let section_results = build_section_results(
+        let mut section_results = build_section_results(
             &requested,
             &section_timestamps,
             &supported,
@@ -780,6 +847,7 @@ impl MoodleClient {
         );
         let call_count = self.call_count.load(Ordering::Relaxed);
         let retry_count = self.retry_count.load(Ordering::Relaxed);
+        apply_retry_metadata(&mut section_results, self.retry_after_seconds());
 
         let mut dashboard = json!({
             "version": SNAPSHOT_SCHEMA_VERSION,
@@ -808,7 +876,7 @@ impl MoodleClient {
             return Err(CoreError::Input("course_id must be positive".to_owned()));
         }
         self.begin_budget(LOAD_COURSE_ATTEMPT_BUDGET, Duration::from_secs(30));
-        let (site, courses) = self.context(token).await?;
+        let (site, courses) = self.context_for_provider(token).await?;
         let user_id = site
             .get("userid")
             .and_then(Value::as_i64)
@@ -884,7 +952,7 @@ impl MoodleClient {
         }
 
         let supports_announcements = capabilities.contains("core_course_get_contents")
-            && capabilities.contains("mod_forum_get_forum_discussions_paginated");
+            && forum_discussions_supported(&capabilities);
         let supports_resources = capabilities.contains("core_course_get_contents");
         let contents = if supports_announcements || supports_resources {
             match self
@@ -906,8 +974,14 @@ impl MoodleClient {
         };
         let announcements = match contents.as_ref() {
             Some(contents) if supports_announcements => {
-                self.announcements_from_contents(token, contents, &course, &mut failures)
-                    .await
+                self.announcements_from_contents(
+                    token,
+                    contents,
+                    &course,
+                    &capabilities,
+                    &mut failures,
+                )
+                .await
             }
             _ => Vec::new(),
         };
@@ -920,7 +994,7 @@ impl MoodleClient {
         };
 
         let failures = aggregate_failures(failures);
-        let section_results = build_course_section_results(
+        let mut section_results = build_course_section_results(
             supports_assignments,
             supports_grades,
             supports_announcements,
@@ -929,6 +1003,7 @@ impl MoodleClient {
         );
         let call_count = self.call_count.load(Ordering::Relaxed);
         let retry_count = self.retry_count.load(Ordering::Relaxed);
+        apply_retry_metadata(&mut section_results, self.retry_after_seconds());
         let mut detail = json!({
             "version": SNAPSHOT_SCHEMA_VERSION,
             "course": course,
@@ -1019,10 +1094,11 @@ impl MoodleClient {
         {
             return (Vec::new(), Vec::new());
         }
-        let supports_announcements = wants_announcements
-            && capabilities.contains("mod_forum_get_forum_discussions_paginated");
+        let supports_announcements =
+            wants_announcements && forum_discussions_supported(capabilities);
         let mut announcements = Vec::new();
         let mut resources = Vec::new();
+        let mut announcement_courses_fetched = 0_usize;
         let content_results = stream::iter(courses.iter().cloned().map(|course| async move {
             let course_id = course.get("id").and_then(Value::as_i64);
             let result = match course_id {
@@ -1052,12 +1128,22 @@ impl MoodleClient {
                     continue;
                 }
             };
-            if supports_announcements && announcements.len() < ANNOUNCEMENT_LIMIT {
+            if supports_announcements
+                && announcements.len() < ANNOUNCEMENT_LIMIT
+                && announcement_courses_fetched < ANNOUNCEMENT_FETCH_LIMIT
+            {
+                announcement_courses_fetched += 1;
                 announcements.extend(
-                    self.announcements_from_contents(token, &contents, &course, failures)
-                        .await
-                        .into_iter()
-                        .take(ANNOUNCEMENT_LIMIT - announcements.len()),
+                    self.announcements_from_contents(
+                        token,
+                        &contents,
+                        &course,
+                        capabilities,
+                        failures,
+                    )
+                    .await
+                    .into_iter()
+                    .take(ANNOUNCEMENT_LIMIT - announcements.len()),
                 );
             }
             if wants_resources && resources.len() < RESOURCE_LIMIT {
@@ -1084,20 +1170,42 @@ impl MoodleClient {
         token: &str,
         contents: &Value,
         course: &Value,
+        capabilities: &HashSet<String>,
         failures: &mut Vec<String>,
     ) -> Vec<Value> {
         let forums = forum_modules(contents);
         let mut output = Vec::new();
+        let mut forum_attempts = 0_usize;
         for forum in forums {
-            if output.len() >= ANNOUNCEMENT_LIMIT {
+            if forum_attempts >= 1 || output.len() >= ANNOUNCEMENT_LIMIT {
                 break;
             }
             let forum_id = match forum.get("instance").and_then(Value::as_i64) {
                 Some(value) => value,
                 None => continue,
             };
-            match self.call(token, "mod_forum_get_forum_discussions_paginated", json!({ "forumid": forum_id, "sortby": "timemodified", "sortdirection": "DESC", "page": 0, "perpage": ANNOUNCEMENT_LIMIT - output.len() })).await {
-                Ok(value) => output.extend(value.get("discussions").and_then(Value::as_array).into_iter().flatten().map(|discussion| announcement_item(discussion, course, &forum))),
+            forum_attempts += 1;
+            let modern = "mod_forum_get_forum_discussions_paginated";
+            let legacy = "mod_forum_get_forum_discussions";
+            let function = if capabilities.contains(modern) {
+                modern
+            } else {
+                legacy
+            };
+            let params = if function == modern {
+                json!({ "forumid": forum_id, "sortby": "timemodified", "sortdirection": "DESC", "page": 0, "perpage": ANNOUNCEMENT_LIMIT - output.len() })
+            } else {
+                json!({ "forumid": forum_id, "sortby": "timemodified", "sortdirection": "DESC" })
+            };
+            match self.call(token, function, params).await {
+                Ok(value) => output.extend(
+                    value
+                        .get("discussions")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .map(|discussion| announcement_item(discussion, course, &forum)),
+                ),
                 Err(error) => failures.push(section_failure("Announcements", &error)),
             }
         }
@@ -1192,21 +1300,21 @@ impl MoodleClient {
         cap: usize,
         retryable: bool,
     ) -> Result<Value, CoreError> {
-        let mut retry_delay = None;
         for attempt in 0..2 {
-            if let Some(delay) = retry_delay.take() {
-                tokio::time::sleep(delay).await;
-            }
+            self.wait_for_cooldown().await?;
             self.take_attempt()?;
-            let response = self.http.post(endpoint.clone()).form(&form).send().await;
+            let response = self
+                .send_form_with_remaining_budget(endpoint.clone(), &form)
+                .await;
             let result = match response {
                 Ok(response) => {
                     let retry_after = retry_after_delay(response.headers());
+                    self.record_cooldown(retry_after);
                     parse_json_response(response, cap)
                         .await
                         .map_err(|error| (error, retry_after))
                 }
-                Err(error) => Err((CoreError::from(error), None)),
+                Err(error) => Err((error, None)),
             };
             match result {
                 Ok(value) => return Ok(value),
@@ -1214,7 +1322,7 @@ impl MoodleClient {
                     if retryable && attempt == 0 && is_retryable_read_error(&error) =>
                 {
                     self.retry_count.fetch_add(1, Ordering::Relaxed);
-                    retry_delay = Some(retry_after.unwrap_or_else(retry_jitter));
+                    self.record_cooldown(Some(retry_after.unwrap_or_else(retry_jitter)));
                 }
                 Err((error, _)) => return Err(error),
             }
@@ -1267,9 +1375,16 @@ async fn dispatch(request: Request, client: &MoodleClient) -> Result<Value, Core
         .params
         .as_object()
         .ok_or_else(|| CoreError::Input("params must be an object".to_owned()))?;
+    let school_id = approved_school_id(object)?;
+    let provider = MoodleProvider::new(Arc::new(client.clone()));
     match request.method {
         Method::Hello => Ok(client.hello()),
         Method::AuthenticateWithPassword => {
+            if school_id != DEFAULT_SCHOOL_ID {
+                return Err(CoreError::Unsupported(
+                    "school is not in the production registry".to_owned(),
+                ));
+            }
             client
                 .authenticate_with_password(
                     required_string(object, "username")?,
@@ -1278,25 +1393,27 @@ async fn dispatch(request: Request, client: &MoodleClient) -> Result<Value, Core
                 .await
         }
         Method::AuthenticateWithToken => {
-            client
-                .authenticate_with_token(required_string(object, "token")?)
+            provider
+                .authenticate_token(required_string(object, "token")?)
                 .await
         }
         Method::DiscoverCapabilities => {
-            client
-                .discover_capabilities(required_string(object, "token")?)
+            provider
+                .capabilities(required_string(object, "token")?)
                 .await
         }
         Method::RefreshDashboard => {
-            client
-                .refresh_dashboard(
+            provider
+                .fetch_sections(
                     required_string(object, "token")?,
                     optional_sections(object)?,
+                    optional_unix_seconds(object, "day_start")?,
+                    optional_unix_seconds(object, "day_end")?,
                 )
                 .await
         }
         Method::LoadCourse => {
-            client
+            provider
                 .load_course(
                     required_string(object, "token")?,
                     required_i64(object, "course_id")?,
@@ -1304,8 +1421,22 @@ async fn dispatch(request: Request, client: &MoodleClient) -> Result<Value, Core
                 .await
         }
         Method::ResolveDestination => {
-            client.resolve_destination(required_string(object, "destination")?)
+            provider.resolve_destination(required_string(object, "destination")?)
         }
+    }
+}
+
+fn approved_school_id(object: &Map<String, Value>) -> Result<&str, CoreError> {
+    let school_id = object
+        .get("school_id")
+        .and_then(Value::as_str)
+        .unwrap_or(DEFAULT_SCHOOL_ID);
+    if school_id == DEFAULT_SCHOOL_ID {
+        Ok(school_id)
+    } else {
+        Err(CoreError::Unsupported(
+            "school is not in the production registry".to_owned(),
+        ))
     }
 }
 
@@ -1322,6 +1453,16 @@ fn required_i64(object: &Map<String, Value>, key: &str) -> Result<i64, CoreError
         .and_then(Value::as_i64)
         .filter(|value| *value > 0)
         .ok_or_else(|| CoreError::Input(format!("{key} must be positive")))
+}
+fn optional_unix_seconds(object: &Map<String, Value>, key: &str) -> Result<Option<i64>, CoreError> {
+    match object.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_i64()
+            .filter(|value| *value > 0)
+            .map(Some)
+            .ok_or_else(|| CoreError::Input(format!("{key} must be unix seconds"))),
+    }
 }
 fn optional_sections(object: &Map<String, Value>) -> Result<Option<&[Value]>, CoreError> {
     match object.get("sections") {
@@ -1410,14 +1551,19 @@ fn is_retryable_read_error(error: &CoreError) -> bool {
 }
 
 fn retry_after_delay(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
-    let seconds = headers
+    let value = headers
         .get(reqwest::header::RETRY_AFTER)?
         .to_str()
         .ok()?
-        .trim()
-        .parse::<u64>()
-        .ok()?;
-    (seconds <= 10).then(|| Duration::from_secs(seconds))
+        .trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let retry_at = OffsetDateTime::parse(value, &Rfc2822).ok()?;
+    let seconds = (retry_at - OffsetDateTime::now_utc())
+        .whole_seconds()
+        .max(0) as u64;
+    Some(Duration::from_secs(seconds))
 }
 
 fn retry_jitter() -> Duration {
@@ -1483,6 +1629,10 @@ fn capabilities(site: &Value) -> HashSet<String> {
         .map(str::to_owned)
         .collect()
 }
+fn forum_discussions_supported(available: &HashSet<String>) -> bool {
+    available.contains("mod_forum_get_forum_discussions_paginated")
+        || available.contains("mod_forum_get_forum_discussions")
+}
 fn capability_support(site: &Value) -> Value {
     let available = capabilities(site);
     json!({
@@ -1491,7 +1641,7 @@ fn capability_support(site: &Value) -> Value {
         "notifications": available.contains("message_popup_get_popup_notifications"),
         "assignments": available.contains("mod_assign_get_assignments"),
         "submission_status": available.contains("mod_assign_get_submission_status"),
-        "announcements": available.contains("core_course_get_contents") && available.contains("mod_forum_get_forum_discussions_paginated"),
+        "announcements": available.contains("core_course_get_contents") && forum_discussions_supported(&available),
         "messages": available.contains("core_message_get_conversations"),
         "grades": available.contains("gradereport_user_get_grade_items"),
         "resources": available.contains("core_course_get_contents")
@@ -1574,12 +1724,33 @@ fn instructor_from_course_title(course_name: &str) -> Option<String> {
         .any(|prefix| normalized.starts_with(prefix))
         .then(|| candidate.to_owned())
 }
-fn timestamp_is_today(value: Option<&str>) -> bool {
-    let Some(value) = value else { return false };
-    let Ok(timestamp) = OffsetDateTime::parse(value, &Rfc3339) else {
-        return false;
-    };
-    timestamp.date() == OffsetDateTime::now_utc().date()
+fn local_day_interval(start: Option<i64>, end: Option<i64>) -> Result<(i64, i64), CoreError> {
+    match (start, end) {
+        (Some(start), Some(end)) if end > start => Ok((start, end)),
+        (Some(_), Some(_)) => Err(CoreError::Input(
+            "day_end must be after day_start".to_owned(),
+        )),
+        (None, None) => {
+            let now = OffsetDateTime::now_utc()
+                .to_offset(time::UtcOffset::from_hms(8, 0, 0).expect("Manila offset"));
+            let start = now
+                .date()
+                .with_time(time::Time::MIDNIGHT)
+                .assume_offset(now.offset())
+                .unix_timestamp();
+            Ok((start, start + 24 * 60 * 60))
+        }
+        _ => Err(CoreError::Input(
+            "day_start and day_end must be provided together".to_owned(),
+        )),
+    }
+}
+fn timestamp_in_interval(value: Option<&str>, start: i64, end: i64) -> bool {
+    value
+        .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
+        .is_some_and(|timestamp| {
+            timestamp.unix_timestamp() >= start && timestamp.unix_timestamp() < end
+        })
 }
 fn actionable_assignments(items: &[Value]) -> Vec<Value> {
     let now = OffsetDateTime::now_utc();
@@ -1844,28 +2015,62 @@ fn assignment_items(value: &Value) -> Vec<Value> {
     items
 }
 fn submission_status(value: &Value) -> String {
-    let status = value
-        .get("lastattempt")
-        .and_then(|value| value.get("submission"))
-        .or_else(|| value.get("submission"));
-    let status_name = status
-        .and_then(|value| value.get("status"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let reopened = value
+    let attempt = value.get("lastattempt").unwrap_or(value);
+    let submission = attempt
+        .get("submission")
+        .or_else(|| attempt.get("teamsubmission"));
+    let status_name = submission
+        .and_then(|submission| submission.get("status").or_else(|| submission.get("state")))
+        .and_then(Value::as_str);
+    let grading_status = attempt
+        .get("gradingstatus")
+        .or_else(|| value.get("gradingstatus"))
+        .and_then(Value::as_str);
+    let graded = attempt
+        .get("graded")
+        .or_else(|| value.get("graded"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let feedback_grade = attempt
         .get("feedback")
-        .and_then(|value| value.get("grade"))
-        .and_then(Value::as_i64)
-        .is_some_and(|grade| grade < 0);
+        .or_else(|| value.get("feedback"))
+        .and_then(|feedback| feedback.get("grade"))
+        .and_then(grade_number);
+
+    if graded || grading_status == Some("graded") || feedback_grade.is_some() {
+        return "graded".to_owned();
+    }
     match status_name {
-        "submitted" => "submitted",
-        "new" | "noattempt" | "" if reopened => "reopened",
-        "new" | "noattempt" | "" => "not_submitted",
-        "graded" => "graded",
-        "reopened" => "reopened",
+        Some("submitted") => "submitted",
+        Some("new") | Some("noattempt") => "not_submitted",
+        Some("reopened") => "reopened",
         _ => "unknown",
     }
     .to_owned()
+}
+fn grade_number(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_str()?.trim().parse().ok())
+        .or_else(|| value.get("grade").and_then(grade_number))
+        .or_else(|| value.get("gradefordisplay").and_then(grade_number))
+}
+fn merge_assignment_statuses(assignments: &[Value], rows: &mut [Value]) {
+    for row in rows {
+        let destination = row.get("destination").and_then(Value::as_str);
+        let Some(assignment) = assignments.iter().find(|assignment| {
+            assignment.get("destination").and_then(Value::as_str) == destination
+                || assignment.get("entity_key") == row.get("entity_key")
+        }) else {
+            continue;
+        };
+        let Some(status) = assignment.get("submission_status").cloned() else {
+            continue;
+        };
+        row.as_object_mut()
+            .expect("calendar item object")
+            .insert("submission_status".to_owned(), status);
+    }
 }
 fn forum_modules(value: &Value) -> Vec<Value> {
     value
@@ -1884,17 +2089,20 @@ fn forum_modules(value: &Value) -> Vec<Value> {
         .collect()
 }
 fn announcement_item(discussion: &Value, course: &Value, forum: &Value) -> Value {
-    let destination_value = destination(discussion);
-    let destination_value = if destination_value.is_empty() {
-        let forum_id = forum
-            .get("id")
-            .or_else(|| forum.get("instance"))
-            .and_then(Value::as_i64)
-            .unwrap_or_default();
-        format!("/mod/forum/view.php?id={forum_id}")
-    } else {
-        destination_value
-    };
+    let destination_value = discussion
+        .get("id")
+        .or_else(|| discussion.get("discussionid"))
+        .and_then(Value::as_i64)
+        .map(|id| format!("/mod/forum/discuss.php?d={id}"))
+        .or_else(|| (!destination(discussion).is_empty()).then(|| destination(discussion)))
+        .unwrap_or_else(|| {
+            let forum_id = forum
+                .get("id")
+                .or_else(|| forum.get("instance"))
+                .and_then(Value::as_i64)
+                .unwrap_or_default();
+            format!("/mod/forum/view.php?id={forum_id}")
+        });
     let mut result = item(
         discussion.get("id").cloned().unwrap_or(Value::Null),
         "announcement",
@@ -2240,6 +2448,19 @@ fn build_section_results(
     }
     Value::Object(results)
 }
+fn apply_retry_metadata(section_results: &mut Value, retry_after_seconds: Option<u64>) {
+    let Some(seconds) = retry_after_seconds else {
+        return;
+    };
+    let Some(results) = section_results.as_object_mut() else {
+        return;
+    };
+    for result in results.values_mut() {
+        if let Some(object) = result.as_object_mut() {
+            object.insert("retry_after_seconds".to_owned(), json!(seconds));
+        }
+    }
+}
 
 fn section_error_code(error: &str) -> &'static str {
     if error.contains("rate limit") {
@@ -2452,13 +2673,39 @@ fn mark_section_truncated_with_available(payload: &mut Value, section: &str, ava
 
 pub fn redact(value: &str) -> String {
     let mut output = value.to_owned();
-    for key in ["token", "wstoken", "password"] {
-        if let Some(index) = output.to_ascii_lowercase().find(key) {
-            let end = output[index..]
-                .find(['&', ' ', '\n', '"'])
-                .map(|offset| index + offset)
+    for key in ["token", "wstoken", "password", "authorization", "secret"] {
+        let mut search_from = 0;
+        loop {
+            let lower = output[search_from..].to_ascii_lowercase();
+            let Some(found) = lower.find(key) else { break };
+            let key_start = search_from + found;
+            let after_key = key_start + key.len();
+            let separator = output[after_key..]
+                .find(['=', ':'])
+                .map(|offset| after_key + offset);
+            let Some(separator) = separator else {
+                search_from = after_key;
+                continue;
+            };
+            let value_start = output[separator + 1..]
+                .char_indices()
+                .find(|(_, character)| {
+                    !character.is_whitespace() && *character != '\"' && *character != '\''
+                })
+                .map(|(offset, _)| separator + 1 + offset);
+            let Some(value_start) = value_start else {
+                break;
+            };
+            let value_end = output[value_start..]
+                .find(['&', ' ', '\n', '\r', '\"', '\'', ',', '}'])
+                .map(|offset| value_start + offset)
                 .unwrap_or(output.len());
-            output.replace_range(index..end, "[REDACTED]");
+            if value_end <= value_start {
+                search_from = value_start + 1;
+                continue;
+            }
+            output.replace_range(value_start..value_end, "[REDACTED]");
+            search_from = value_start + "[REDACTED]".len();
         }
     }
     output
@@ -2467,10 +2714,294 @@ pub fn redact(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::CanvasProvider;
     use wiremock::{
-        Mock, MockServer, ResponseTemplate,
+        Mock, MockServer, Request as WiremockRequest, Respond, ResponseTemplate,
         matchers::{method, path},
     };
+
+    #[derive(Clone)]
+    struct DashboardResponder {
+        grade_calls: Arc<AtomicUsize>,
+    }
+
+    #[derive(Clone)]
+    struct CanvasResponder {
+        origin: String,
+    }
+
+    impl Respond for CanvasResponder {
+        fn respond(&self, request: &WiremockRequest) -> ResponseTemplate {
+            assert_eq!(
+                request
+                    .headers
+                    .get("authorization")
+                    .and_then(|value| value.to_str().ok()),
+                Some("Bearer canvas-oauth-token")
+            );
+            let path = request.url.path();
+            if path == "/api/v1/courses" && request.url.query() == Some("enrollment_state=active") {
+                return ResponseTemplate::new(200)
+                    .insert_header(
+                        "Link",
+                        format!(
+                            "<http://invalid>; rel=prev, <{}/api/v1/courses?page=2>; rel=\"next\"",
+                            self.origin
+                        ),
+                    )
+                    .set_body_json(json!([{ "id": 1, "name": "Canvas One" }]));
+            }
+            if path == "/api/v1/courses" && request.url.query() == Some("page=2") {
+                return ResponseTemplate::new(200)
+                    .set_body_json(json!([{ "id": 2, "name": "Canvas Two" }]));
+            }
+            ResponseTemplate::new(200).set_body_json(json!([]))
+        }
+    }
+
+    #[tokio::test]
+    async fn canvas_fixture_paginates_only_same_origin_bearer_requests() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(CanvasResponder {
+                origin: server.uri(),
+            })
+            .mount(&server)
+            .await;
+        let provider = CanvasProvider::for_fixture(Url::parse(&server.uri()).unwrap()).unwrap();
+        let courses = provider.courses("canvas-oauth-token").await.unwrap();
+        assert_eq!(courses.as_array().unwrap().len(), 2);
+        assert_eq!(courses[0]["id"], 1);
+        assert_eq!(courses[1]["id"], 2);
+    }
+
+    #[test]
+    fn canvas_fixture_rejects_off_origin_destination_and_link() {
+        let provider =
+            CanvasProvider::for_fixture(Url::parse("http://127.0.0.1:12345").unwrap()).unwrap();
+        assert!(matches!(
+            provider.resolve_destination("https://example.edu/api/v1/courses"),
+            Err(CoreError::Origin)
+        ));
+        assert_eq!(
+            crate::provider::canvas_next_link(
+                "<https://example.edu/api/v1/courses?page=2>; rel=\"next\""
+            ),
+            Some("https://example.edu/api/v1/courses?page=2".to_owned())
+        );
+    }
+
+    #[derive(Clone)]
+    struct CanvasCycleResponder {
+        origin: String,
+    }
+
+    impl Respond for CanvasCycleResponder {
+        fn respond(&self, _request: &WiremockRequest) -> ResponseTemplate {
+            ResponseTemplate::new(200)
+                .insert_header(
+                    "Link",
+                    format!(
+                        "<{}/api/v1/courses?enrollment_state=active>; rel=\"next\"",
+                        self.origin
+                    ),
+                )
+                .set_body_json(json!([]))
+        }
+    }
+
+    #[tokio::test]
+    async fn canvas_fixture_rejects_pagination_cycles_and_malformed_arrays() {
+        let cycle_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(CanvasCycleResponder {
+                origin: cycle_server.uri(),
+            })
+            .mount(&cycle_server)
+            .await;
+        let cycle = CanvasProvider::for_fixture(Url::parse(&cycle_server.uri()).unwrap()).unwrap();
+        assert!(matches!(
+            cycle.courses("canvas-oauth-token").await,
+            Err(CoreError::Response(message)) if message.contains("cycle")
+        ));
+
+        let malformed_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "courses": [] })))
+            .mount(&malformed_server)
+            .await;
+        let malformed =
+            CanvasProvider::for_fixture(Url::parse(&malformed_server.uri()).unwrap()).unwrap();
+        assert!(matches!(
+            malformed.courses("canvas-oauth-token").await,
+            Err(CoreError::Response(message)) if message.contains("array")
+        ));
+    }
+
+    #[derive(Clone)]
+    struct CanvasRateLimitResponder;
+
+    impl Respond for CanvasRateLimitResponder {
+        fn respond(&self, _request: &WiremockRequest) -> ResponseTemplate {
+            ResponseTemplate::new(429).insert_header("Retry-After", "0")
+        }
+    }
+
+    #[tokio::test]
+    async fn canvas_fixture_propagates_rate_limit_without_retrying_writes() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(CanvasRateLimitResponder)
+            .mount(&server)
+            .await;
+        let provider = CanvasProvider::for_fixture(Url::parse(&server.uri()).unwrap()).unwrap();
+        assert!(matches!(
+            provider.courses("canvas-oauth-token").await,
+            Err(CoreError::RateLimited)
+        ));
+    }
+
+    #[derive(Clone)]
+    struct FastThenStalledResponder {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl Respond for FastThenStalledResponder {
+        fn respond(&self, _request: &WiremockRequest) -> ResponseTemplate {
+            if self.calls.fetch_add(1, Ordering::Relaxed) == 0 {
+                ResponseTemplate::new(200).set_body_json(json!({ "section": "fast" }))
+            } else {
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_secs(2))
+                    .set_body_json(json!({ "section": "slow" }))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn remaining_budget_times_out_stalled_later_request_after_fast_result() {
+        let server = MockServer::start().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .respond_with(FastThenStalledResponder { calls })
+            .mount(&server)
+            .await;
+        let client = MoodleClient::for_test(Url::parse(&server.uri()).unwrap()).unwrap();
+        client.begin_budget(2, Duration::from_millis(100));
+        let endpoint = client.endpoint("webservice/rest/server.php").unwrap();
+        let first = client
+            .post_form(endpoint.clone(), vec![], RESPONSE_CAP_BYTES)
+            .await
+            .unwrap();
+        let later = client.post_form(endpoint, vec![], RESPONSE_CAP_BYTES).await;
+        assert_eq!(first["section"], "fast");
+        assert!(matches!(later, Err(CoreError::Timeout)));
+    }
+
+    impl Respond for DashboardResponder {
+        fn respond(&self, request: &WiremockRequest) -> ResponseTemplate {
+            let body = String::from_utf8_lossy(&request.body);
+            let response = if body.contains("core_webservice_get_site_info") {
+                json!({ "userid": 42, "functions": [
+                    { "name": "core_enrol_get_users_courses" },
+                    { "name": "gradereport_user_get_grade_items" }
+                ] })
+            } else if body.contains("core_enrol_get_users_courses") {
+                json!(
+                    (1..=13)
+                        .map(|id| json!({ "id": id, "fullname": format!("Course {id}") }))
+                        .collect::<Vec<_>>()
+                )
+            } else if body.contains("gradereport_user_get_grade_items") {
+                self.grade_calls.fetch_add(1, Ordering::Relaxed);
+                json!({ "usergrades": [{ "gradeitems": [{ "itemtype": "course", "gradeformatted": "1.00", "hidden": 0 }] }] })
+            } else {
+                json!({})
+            };
+            ResponseTemplate::new(200).set_body_json(response)
+        }
+    }
+
+    #[tokio::test]
+    async fn dashboard_grade_overlay_retains_complete_course_index() {
+        let server = MockServer::start().await;
+        let grade_calls = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("POST"))
+            .and(path("/webservice/rest/server.php"))
+            .respond_with(DashboardResponder {
+                grade_calls: grade_calls.clone(),
+            })
+            .mount(&server)
+            .await;
+        let client = MoodleClient::for_test(Url::parse(&server.uri()).unwrap()).unwrap();
+        let dashboard = client
+            .refresh_dashboard("test-token", Some(&[json!("grades")]), None, None)
+            .await
+            .unwrap();
+        assert_eq!(grade_calls.load(Ordering::Relaxed), HEAVY_COURSE_LIMIT);
+        let courses = dashboard["courses"].as_array().unwrap();
+        assert_eq!(courses.len(), 13);
+        assert_eq!(courses[0]["id"], 1);
+        assert_eq!(courses[12]["id"], 13);
+        assert_eq!(courses[0]["published_total"], "1.00");
+        assert!(courses[HEAVY_COURSE_LIMIT].get("published_total").is_none());
+        assert_eq!(dashboard["section_results"]["grades"]["truncated"], true);
+    }
+
+    #[derive(Clone)]
+    struct CalendarStartResponder {
+        calendar_body: Arc<Mutex<String>>,
+    }
+
+    impl Respond for CalendarStartResponder {
+        fn respond(&self, request: &WiremockRequest) -> ResponseTemplate {
+            let body = String::from_utf8_lossy(&request.body).into_owned();
+            if body.contains("core_webservice_get_site_info") {
+                return ResponseTemplate::new(200).set_body_json(
+                    json!({ "userid": 42, "functions": [
+                    { "name": "core_enrol_get_users_courses" },
+                    { "name": "core_calendar_get_action_events_by_timesort" }
+                ] }),
+                );
+            }
+            if body.contains("core_enrol_get_users_courses") {
+                return ResponseTemplate::new(200).set_body_json(json!([]));
+            }
+            if body.contains("core_calendar_get_action_events_by_timesort") {
+                *self.calendar_body.lock().expect("calendar body") = body;
+                return ResponseTemplate::new(200).set_body_json(json!({ "events": [] }));
+            }
+            ResponseTemplate::new(200).set_body_json(json!({}))
+        }
+    }
+
+    #[tokio::test]
+    async fn schedule_fetch_starts_at_the_requested_local_day() {
+        let server = MockServer::start().await;
+        let calendar_body = Arc::new(Mutex::new(String::new()));
+        Mock::given(method("POST"))
+            .respond_with(CalendarStartResponder {
+                calendar_body: calendar_body.clone(),
+            })
+            .mount(&server)
+            .await;
+        let client = MoodleClient::for_test(Url::parse(&server.uri()).unwrap()).unwrap();
+        client
+            .refresh_dashboard(
+                "test-token",
+                Some(&[json!("schedule")]),
+                Some(100),
+                Some(200),
+            )
+            .await
+            .unwrap();
+        assert!(
+            calendar_body
+                .lock()
+                .expect("calendar body")
+                .contains("timesortfrom=100")
+        );
+    }
 
     #[tokio::test]
     async fn password_exchange_returns_token_without_echoing_password() {
@@ -2566,7 +3097,7 @@ mod tests {
         let second = client.select_heavy_courses(&courses);
         assert_eq!(first.len(), HEAVY_COURSE_LIMIT);
         assert_eq!(first[0]["id"], 1);
-        assert_eq!(second[0]["id"], 13);
+        assert_eq!(second[0]["id"], 7);
     }
 
     #[test]
@@ -2587,7 +3118,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_after_is_bounded_and_only_transient_errors_retry() {
+    fn retry_after_accepts_seconds_and_only_transient_errors_retry() {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::RETRY_AFTER,
@@ -2598,7 +3129,7 @@ mod tests {
             reqwest::header::RETRY_AFTER,
             reqwest::header::HeaderValue::from_static("11"),
         );
-        assert_eq!(retry_after_delay(&headers), None);
+        assert_eq!(retry_after_delay(&headers), Some(Duration::from_secs(11)));
         assert!(is_retryable_read_error(&CoreError::ServiceUnavailable));
         assert!(!is_retryable_read_error(&CoreError::Authentication(
             "no".to_owned()
@@ -2631,10 +3162,63 @@ mod tests {
         assert!(MoodleClient::new(Url::parse("https://example.edu").unwrap(), false).is_err());
     }
     #[test]
+    fn production_registry_defaults_to_lpu_and_rejects_unknown_school() {
+        let empty = Map::new();
+        assert_eq!(approved_school_id(&empty).unwrap(), DEFAULT_SCHOOL_ID);
+        let unknown = Map::from_iter([(String::from("school_id"), json!("canvas-fixture"))]);
+        assert!(matches!(
+            approved_school_id(&unknown),
+            Err(CoreError::Unsupported(_))
+        ));
+    }
+    #[test]
     fn redacts_secret_fragments() {
         let value = redact("request token=abc123 password=hello");
         assert!(!value.contains("abc123"));
         assert!(!value.contains("hello"));
+    }
+    #[test]
+    fn redacts_repeated_and_json_quoted_secrets() {
+        let value = redact(r#"token=first token=second {"password":"third"}"#);
+        assert!(!value.contains("first"));
+        assert!(!value.contains("second"));
+        assert!(!value.contains("third"));
+    }
+    #[test]
+    fn local_day_interval_uses_passed_bounds_and_validates_pair() {
+        assert_eq!(
+            local_day_interval(Some(100), Some(200)).unwrap(),
+            (100, 200)
+        );
+        assert!(local_day_interval(Some(100), None).is_err());
+        assert!(timestamp_in_interval(
+            Some("1970-01-01T00:02:30Z"),
+            100,
+            200
+        ));
+        assert!(!timestamp_in_interval(
+            Some("1970-01-01T00:03:20Z"),
+            100,
+            200
+        ));
+    }
+    #[test]
+    fn forum_rows_use_discussion_permalink_for_unique_identity() {
+        let course = json!({ "id": 12, "name": "History" });
+        let forum = json!({ "instance": 7 });
+        let first = announcement_item(&json!({ "id": 10, "subject": "One" }), &course, &forum);
+        let second = announcement_item(&json!({ "id": 11, "subject": "Two" }), &course, &forum);
+        assert_eq!(first["destination"], "/mod/forum/discuss.php?d=10");
+        assert_ne!(first["entity_key"], second["entity_key"]);
+    }
+    #[test]
+    fn status_merges_from_assignment_into_calendar_row() {
+        let assignment = json!({ "entity_key": "lms:/mod/assign/view.php?id=42", "destination": "/mod/assign/view.php?id=42", "submission_status": "graded" });
+        let mut due = vec![
+            json!({ "entity_key": "lms:/mod/assign/view.php?id=42", "destination": "/mod/assign/view.php?id=42" }),
+        ];
+        merge_assignment_statuses(&[assignment], &mut due);
+        assert_eq!(due[0]["submission_status"], "graded");
     }
     #[test]
     fn rejects_cross_origin_destination() {
@@ -2863,6 +3447,21 @@ mod tests {
             submission_status(&json!({ "submission": { "status": "reopened" } })),
             "reopened"
         );
+        assert_eq!(
+            submission_status(&json!({ "lastattempt": { "graded": true } })),
+            "graded"
+        );
+        assert_eq!(
+            submission_status(
+                &json!({ "lastattempt": { "teamsubmission": { "status": "submitted" } } })
+            ),
+            "submitted"
+        );
+        assert_eq!(
+            submission_status(&json!({ "feedback": { "grade": { "grade": 88 } } })),
+            "graded"
+        );
+        assert_eq!(submission_status(&json!({})), "unknown");
     }
     #[test]
     fn submission_status_candidates_are_windowed_and_capped() {
@@ -2912,7 +3511,11 @@ mod tests {
     fn five_course_call_budgets_are_bounded() {
         assert_eq!(dashboard_core_call_budget(100), 18);
         assert!(dashboard_core_call_budget(100) <= 18);
-        assert_eq!(dashboard_heavy_call_budget(5, 3, 100), 31);
+        assert_eq!(dashboard_heavy_call_budget(5, 3, 100), 30);
+        assert_eq!(
+            dashboard_heavy_call_budget(100, 100, 100),
+            DASHBOARD_ATTEMPT_BUDGET
+        );
     }
     #[test]
     fn resources_drop_cross_origin_urls() {

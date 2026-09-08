@@ -96,9 +96,10 @@ public enum PipoDeadlineGroup: String, CaseIterable, Codable, Sendable {
 }
 
 public enum PipoDashboardRanking {
-    public static func nextUp(snapshot: DashboardSnapshot, state: PipoLocalState, now: Date = .now, calendar: Calendar = .current) -> [DashboardItem] {
+    public static func nextUp(snapshot: DashboardSnapshot, state: PipoLocalState, now: Date = .now, calendar: Calendar = PipoSchoolClock.calendar) -> [DashboardItem] {
         let candidates = DashboardItem.deduplicated(snapshot.sections.dueSoon + snapshot.sections.newAssignments + snapshot.schedule + snapshot.announcements)
         return candidates
+            .filter { $0.submissionStatus != "submitted" && $0.submissionStatus != "graded" }
             .filter { state.snoozedUntil[$0.id].map { $0 <= now } ?? true }
             .filter { $0.kind != "announcement" || !state.seenIDs.contains($0.id) }
             .sorted { lhs, rhs in
@@ -112,7 +113,7 @@ public enum PipoDashboardRanking {
             .map { $0 }
     }
 
-    public static func groupedDeadlines(_ items: [DashboardItem], now: Date = .now, calendar: Calendar = .current) -> [PipoDeadlineGroup: [DashboardItem]] {
+    public static func groupedDeadlines(_ items: [DashboardItem], now: Date = .now, calendar: Calendar = PipoSchoolClock.calendar) -> [PipoDeadlineGroup: [DashboardItem]] {
         Dictionary(grouping: items) { item in
             guard let date = date(item) else { return .later }
             if date < now { return .overdue }
@@ -180,20 +181,34 @@ public extension DashboardSnapshot {
 }
 
 public enum PipoReminderPlanner {
-    public static func reminderDates(for item: DashboardItem, settings: PipoSettings, now: Date = .now, calendar: Calendar = .current) -> [Date] {
+    public static func reminderDates(for item: DashboardItem, settings: PipoSettings, now: Date = .now, calendar: Calendar = PipoSchoolClock.calendar) -> [Date] {
         guard let due = item.timestamp.flatMap({ ISO8601DateFormatter().date(from: $0) }) else { return [] }
         let offsets = [settings.reminderDayBefore ? TimeInterval(24 * 60 * 60) : nil, settings.reminderHourBefore ? TimeInterval(60 * 60) : nil].compactMap { $0 }
-        return offsets.map { shiftOutOfQuietHours(due.addingTimeInterval(-$0), settings: settings, calendar: calendar) }.filter { $0 > now }
+        guard settings.notificationsEnabled, settings.assignmentNotifications,
+              item.submissionStatus != "submitted", item.submissionStatus != "graded" else { return [] }
+        return Array(Set(offsets.map { precedingPermittedTime(due.addingTimeInterval(-$0), settings: settings, calendar: calendar) }))
+            .filter { $0 > now && $0 < due }.sorted()
     }
 
-    public static func shiftOutOfQuietHours(_ date: Date, settings: PipoSettings, calendar: Calendar = .current) -> Date {
+    public static func shiftOutOfQuietHours(_ date: Date, settings: PipoSettings, calendar: Calendar = PipoSchoolClock.calendar) -> Date {
         let hour = calendar.component(.hour, from: date)
         let starts = settings.quietHoursStart
         let ends = settings.quietHoursEnd
         let quiet = starts > ends ? hour >= starts || hour < ends : hour >= starts && hour < ends
         guard quiet else { return date }
-        return calendar.date(bySettingHour: ends, minute: 0, second: 0, of: hour >= starts ? calendar.date(byAdding: .day, value: 1, to: date)! : date) ?? date
+        return calendar.date(bySettingHour: ends, minute: 0, second: 0, of: starts > ends && hour >= starts ? calendar.date(byAdding: .day, value: 1, to: date)! : date) ?? date
     }
+
+    private static func precedingPermittedTime(_ date: Date, settings: PipoSettings, calendar: Calendar) -> Date {
+        let hour = calendar.component(.hour, from: date)
+        let starts = settings.quietHoursStart
+        let ends = settings.quietHoursEnd
+        let quiet = starts > ends ? hour >= starts || hour < ends : hour >= starts && hour < ends
+        guard quiet else { return date }
+        let day = starts > ends && hour < ends ? calendar.date(byAdding: .day, value: -1, to: date)! : date
+        return (calendar.date(bySettingHour: starts, minute: 0, second: 0, of: day) ?? date).addingTimeInterval(-60)
+    }
+
 }
 
 public protocol PipoCalendarService: Sendable {

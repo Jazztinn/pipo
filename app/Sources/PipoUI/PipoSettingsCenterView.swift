@@ -49,6 +49,7 @@ struct PipoSettingsCenterView: View {
     @State private var legalDocument: LegalDocument?
     @AppStorage(PipoLegal.acknowledgementKey) private var acceptedLegalVersion = ""
     @AppStorage("pipo.updates.channel") private var updateChannel = "stable"
+    @AppStorage("pipo.usage-reporting.enabled") private var usageReportingEnabled = true
 
     init(model: PipoModel, configuration: PipoUIConfiguration, onSignOut: @escaping () -> Void) {
         self._model = Bindable(model)
@@ -282,6 +283,12 @@ struct PipoSettingsCenterView: View {
                 }
                 Text("Diagnostics exclude tokens, message bodies, grades, excerpts, and student identity.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Usage data") {
+                Toggle("Share anonymous usage", isOn: $usageReportingEnabled)
+                Text("Pipo sends a random install ID, app version, and launch or heartbeat event. It never sends LMS data, account identity, tokens, or page content. Turning this off stops future reports; aggregate data already counted cannot be removed from this setting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             if isConnected {
                 Section("LMS capabilities") {

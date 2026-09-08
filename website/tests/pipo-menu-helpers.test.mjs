@@ -11,6 +11,17 @@ async function loadHelpers() {
   return context.window.pipoMenuHelpers;
 }
 
+test("context actions dispatch typed course and imported schedule operations", async () => {
+  const helper = await loadHelpers();
+  const actions = (item, type, pinned) => Array.from(helper.contextActions(item, type, pinned), entry => entry.action);
+  assert.deepEqual(actions({ id: "12" }, "course", false), ["openDestination", "copyDetails", "pinCourse", "hideCourse"]);
+  assert.deepEqual(actions({ id: "12" }, "course", true), ["openDestination", "copyDetails", "unpinCourse", "hideCourse"]);
+  for (const kind of ["imported_class", "imported_subject"]) {
+    assert.deepEqual(actions({ kind }, "activity"), ["editSchedule", "copyDetails"]);
+  }
+  assert.ok(actions({ kind: "calendar", section: "schedule", destinationAvailable: true }, "activity").includes("openDestination"));
+});
+
 test("greeting uses stable local-hour periods", async () => {
   const helper = await loadHelpers();
   assert.equal(helper.greetingPeriod(4), "lateNight");
@@ -49,6 +60,9 @@ test("missing LMS values and section phases have safe presentations", async () =
   assert.deepEqual({ ...helper.sectionPresentation("failed", "Messages") }, { kind: "error", text: "Messages could not load.", retry: true });
   assert.deepEqual({ ...helper.sectionPresentation("ready", "Messages") }, { kind: "empty", text: "No messages", retry: false });
   assert.deepEqual({ ...helper.sectionPresentation("failed", "Messages", 1) }, { kind: "content", text: "", retry: false });
+  assert.deepEqual({ ...helper.sectionPresentation("partial", "Messages") }, { kind: "warning", text: "Messages are incomplete. Retry to load remaining items.", retry: true });
+  assert.equal(helper.sectionPresentation("unsupported", "Messages").retry, false);
+  assert.equal(helper.sectionPresentation("authentication_required", "Messages").text, "Sign in again to load messages.");
 });
 
 test("grades preserve LMS formatting and fall back to raw points", async () => {

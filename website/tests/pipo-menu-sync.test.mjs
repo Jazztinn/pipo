@@ -38,7 +38,7 @@ test("website includes canonical Pipo MenuWeb bundle", async () => {
   assert.match(runtime, /nativeBridge\.request\(action, outbound\)/);
   assert.match(runtime, /requestID: generatedID/);
   assert.match(runtime, /renderState\(state\)/);
-  assert.match(runtime, /switchTab\(state\.selectedTab \|\| 'today', false\)/);
+  assert.match(runtime, /switchTab\(state\.selectedTab \|\| activeTab \|\| 'today', false\)/);
   assert.match(runtime, /refreshMinutes/);
   assert.match(runtime, /requestCalendarAccess/);
   assert.doesNotMatch(runtime, /\$\{action\} complete/);

@@ -1,10 +1,11 @@
 {
-  "version": "0.5.2",
-  "build": 29,
+  "version": "0.5.3",
+  "build": 30,
   "importance": "standard",
   "channel": "stable",
   "items": [
-    "Simplified the installer with a crimson-to-black background.",
-    "Removed installer instructions and card panels for a cleaner window."
+    "Stabilized sign-in, refresh cancellation, and encrypted local data recovery.",
+    "Added gated local schedule import with review, editing, and Today views.",
+    "Hardened partial results, actions, release provenance, and service limits."
   ]
 }

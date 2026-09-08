@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: write
+  checks: read
 
 concurrency:
   group: pipo-release-v2
@@ -51,6 +52,23 @@ jobs:
           test "$(jq '.items | length >= 2 and length <= 4' app/Sources/PipoUI/Resources/WhatsNew.json)" = true
           jq -e '.importance == "standard" or .importance == "critical"' app/Sources/PipoUI/Resources/WhatsNew.json >/dev/null
           test "$(git tag -l "v$VERSION")" = ""
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+
+      - name: Require successful checks for exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for required in rust swift menu-web secret-scan; do
+            checks="$RUNNER_TEMP/check-$required.tsv"
+            gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs" \
+              --jq ".check_runs[] | select(.name == \"$required\") | [.started_at, .id, .status, .conclusion] | @tsv" > "$checks"
+            test -s "$checks"
+            latest=$(sort -r "$checks" | head -n 1)
+            status=$(printf '%s' "$latest" | cut -f3)
+            conclusion=$(printf '%s' "$latest" | cut -f4)
+            test "$status" = completed
+            test "$conclusion" = success
+          done
 
       - name: Import Developer ID certificate
         if: inputs.notarize
@@ -72,10 +90,11 @@ jobs:
       - name: Build universal app
         env:
           CODESIGN_IDENTITY: ${{ inputs.notarize && secrets.DEVELOPER_ID_APPLICATION || '-' }}
+          PIPO_BUILD_SHA: ${{ github.sha }}
         run: |
           if [ "${{ inputs.notarize }}" = true ]; then test -n "$CODESIGN_IDENTITY"; fi
           scripts/build-local-beta.sh
-          REQUIRE_NOTARIZATION=0 scripts/verify-release.sh dist/Pipo.app
+          REQUIRE_NOTARIZATION=0 PIPO_BUILD_SHA="$GITHUB_SHA" scripts/verify-release.sh dist/Pipo.app
 
       - name: Verify app signature
         run: |
@@ -101,11 +120,29 @@ jobs:
           printf '%s' "$NOTARY_KEY_P8" | base64 --decode > "$NOTARY_KEY_FILE"
           scripts/notarize-release.sh "dist/Pipo-$VERSION-universal.dmg"
 
+      - name: Create artifact checksum and build manifest
+        env:
+          VERSION: ${{ inputs.version }}
+          NOTARIZED: ${{ inputs.notarize }}
+        run: |
+          DMG="dist/Pipo-$VERSION-universal.dmg"
+          SHA256=$(shasum -a 256 "$DMG" | awk '{print $1}')
+          printf '%s  %s\n' "$SHA256" "$(basename "$DMG")" > "dist/Pipo-$VERSION-universal.sha256"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg source_commit "$GITHUB_SHA" \
+            --arg artifact "$(basename "$DMG")" \
+            --arg sha256 "$SHA256" \
+            --argjson notarized "$NOTARIZED" \
+            '{version: $version, source_commit: $source_commit, artifact: $artifact, sha256: $sha256, notarized: $notarized}' \
+            > "dist/Pipo-$VERSION-universal.manifest.json"
+
       - name: Download Sparkle tools
         env:
           SPARKLE_VERSION: 2.9.2
         run: |
           curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" -o "$RUNNER_TEMP/sparkle.tar.xz"
+          printf '%s  %s\n' "$(awk '$2 == "Sparkle-2.9.2.tar.xz" { print $1 }' .github/vendor-checksums.txt)" "$RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c -
           mkdir "$RUNNER_TEMP/sparkle"
           tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
           test -x "$RUNNER_TEMP/sparkle/bin/generate_appcast"
@@ -172,12 +209,17 @@ jobs:
               printf '\n> This build is not notarized. macOS may require manual approval before first launch.\n'
             fi
           } > "$RUNNER_TEMP/release-notes.md"
-          gh release create "v$VERSION" "dist/Pipo-$VERSION-universal.dmg" \
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+          gh release create "v$VERSION" "dist/Pipo-$VERSION-universal.dmg" "dist/Pipo-$VERSION-universal.sha256" "dist/Pipo-$VERSION-universal.manifest.json" \
             --title "Pipo $VERSION" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --target "$GITHUB_SHA" \
             "${RELEASE_ARGS[@]}"
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add "$FEED"
           git commit -m "release: publish v$VERSION update feed"
+          test "$(git rev-parse HEAD~1)" = "$GITHUB_SHA"
           git push origin HEAD:main

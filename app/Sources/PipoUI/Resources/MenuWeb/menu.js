@@ -3,19 +3,32 @@
   'use strict';
   const params = new URLSearchParams(window.location.search);
   const mode = params.get('mode') === 'demo' ? 'demo' : 'native';
+  const componentNames = new Set(['nextUp', 'today', 'quickActions', 'resources']);
+  const requestedComponent = params.get('component');
+  const componentPreview = componentNames.has(requestedComponent) ? requestedComponent : null;
+  if (componentPreview) {
+    document.documentElement.dataset.componentPreview = componentPreview;
+    const revealComponentPreview = () => {
+      document.documentElement.dataset.componentPreviewReady = 'true';
+    };
+    window.addEventListener('pipo:stateApplied', revealComponentPreview);
+    window.addEventListener('pipo:error', revealComponentPreview, { once: true });
+  }
   if (params.get('embedded') === '1') document.documentElement.classList.add('embedded');
   const nativeBridge = window.pipo;
   const documentGreeting = window.pipoMenuHelpers?.chooseGreeting(new Date(), Math.random()) || 'Hello';
   const initialGreeting = document.getElementById('today-greeting');
   if (initialGreeting) initialGreeting.textContent = documentGreeting;
   const requests = new Map();
-  const allowed = new Set(['ui.ready', 'refresh', 'refreshSection', 'selectTab', 'loadCourse', 'updateSettings', 'updateChannel', 'markSeen', 'undoSeen', 'snooze', 'openDestination', 'copyDetails', 'addToCalendar', 'requestCalendarAccess', 'pinCourse', 'unpinCourse', 'hideCourse', 'restoreCourse', 'clearCache', 'checkForUpdates', 'viewUpdate', 'dismissUpdate', 'dismissWhatsNew', 'exportDiagnostics', 'retrySecureStorage', 'setInspectorVisible', 'dismissMenu', 'signOut']);
+  const allowed = new Set(['ui.ready', 'refresh', 'refreshSection', 'selectTab', 'loadCourse', 'updateSettings', 'updateChannel', 'markSeen', 'undoSeen', 'snooze', 'openDestination', 'copyDetails', 'addToCalendar', 'requestCalendarAccess', 'pinCourse', 'unpinCourse', 'hideCourse', 'restoreCourse', 'clearCache', 'checkForUpdates', 'viewUpdate', 'dismissUpdate', 'dismissWhatsNew', 'exportDiagnostics', 'retrySecureStorage', 'setInspectorVisible', 'dismissMenu', 'signOut', 'editSchedule']);
   let currentState = null;
   let revision = 0;
   let selectedItem = null;
   let selectedType = null;
+  const inspectorStack = [];
   let activeTab = 'today';
   let inspectorTrigger = null;
+  let contextTrigger = null;
   let inspectorCloseTimer = null;
   let inspectorOpenToken = 0;
   let clickAudioPool = [];
@@ -26,6 +39,7 @@
     settings: { query: '', courseFilter: 'all', categoryFilter: 'all' }
   };
   const sectionSignatures = new Map();
+  const retryTargets = Object.freeze({ dueSoon: ['due_soon'], newAssignments: ['assignments'], gradeFeedback: ['grades'], nextUp: ['due_soon', 'assignments', 'schedule', 'announcements'] });
   let todayShellReady = false;
   let whatsNewBuildShown = null;
   const el = (tag, className, value) => { const node = document.createElement(tag); if (className) node.className = className; if (value != null) node.textContent = String(value); return node; };
@@ -41,6 +55,8 @@
   const formatTimestamp = value => { if (!meaningful(value)) return null; const raw = String(value); if (!/^\d{4}-\d{2}-\d{2}T/.test(raw)) return raw; const date = new Date(raw); if (Number.isNaN(date.valueOf())) return null; const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()); const days = Math.round((target - start) / 86400000); const day = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : days > 1 && days < 7 ? new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(date) : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date); const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date); return `${day} · ${time}`; };
   const dateText = item => valueFor(item, 'due', 'date') || formatTimestamp(valueFor(item, 'timestampISO', 'timestamp'));
   const itemText = item => [courseNameFor(item), valueFor(item, 'subtitle', 'courseCode', 'course_code'), dateText(item)].filter(meaningful).join(' · ');
+  const searchText = item => [itemText(item), itemDetail(item), valueFor(item, 'location', 'room')].filter(meaningful).join(' · ');
+  const countdownText = item => { if (!item?.kind?.startsWith('imported_')) return null; const start = new Date(item.timestampISO || item.timestamp); if (Number.isNaN(start.valueOf())) return null; const end = item.endTimestampISO ? new Date(item.endTimestampISO) : null; const now = new Date(); if (end && start <= now && now < end) return 'Now'; if (start > now) { const minutes = Math.max(1, Math.round((start - now) / 60000)); return minutes < 60 ? `in ${minutes}m` : `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`; } return null; };
   const courseActivities = course => {
     const courseID = String(course?.id || courseIDFor(course) || '');
     if (!courseID || !currentState) return [];
@@ -51,13 +67,14 @@
       .filter(item => { const key = String(item?.entityKey || item?.id || `${itemTitle(item)}:${dateText(item) || ''}`); if (seen.has(key)) return false; seen.add(key); return true; });
   };
   const cardSecondary = (item, type) => {
-    if (type !== 'course') return [type === 'activity' ? item?.sourceLabel : null, itemText(item) || itemDetail(item) || type[0].toUpperCase() + type.slice(1)].filter(meaningful).join(' · ');
+    if (type !== 'course') return [type === 'activity' ? item?.sourceLabel : null, searchText(item) || type[0].toUpperCase() + type.slice(1), countdownText(item)].filter(meaningful).join(' · ');
     const suppliedCount = valueFor(item, 'upcomingCount', 'upcoming_count');
     const parsedCount = Number(suppliedCount); const count = suppliedCount == null || !Number.isFinite(parsedCount) ? courseActivities(item).length : parsedCount;
     const publishedTotal = valueFor(item, 'publishedTotal', 'published_total');
     const metadata = [valueFor(item, 'shortName', 'short_name'), meaningful(publishedTotal) && `Grade ${publishedTotal}`, `${count} upcoming`].filter(meaningful);
     return metadata.join(' · ');
   };
+  const categoryFor = (item, fallback) => window.pipoMenuHelpers?.activityCategory?.(item, fallback) || String(item?.kind || fallback || '').toLowerCase();
   function setActionPending(trigger, pending) {
     if (!trigger?.setAttribute) return;
     trigger.toggleAttribute('disabled', pending);
@@ -167,7 +184,10 @@
     const wasClosing = inspector.dataset.closing === 'true';
     delete inspector.dataset.closing;
     if (wasClosing) inspector.classList.remove('inspector-exit');
-    if (trigger) inspectorTrigger = trigger;
+    if (trigger) {
+      if (trigger.closest?.('#inspector-panel') && selectedItem && selectedType) inspectorStack.push({ type: selectedType, item: selectedItem });
+      inspectorTrigger = trigger;
+    }
     selectedItem = item; selectedType = type;
     const shouldLoadCourse = type === 'course' && mode === 'native' && !skipLoad;
     document.getElementById('inspector-category').textContent = type === 'course' ? 'Course' : type[0].toUpperCase() + type.slice(1);
@@ -180,6 +200,9 @@
     syncActivityDetails(type, item);
     syncInspectorCourseData(type === 'course' ? item : null);
     syncInspectorGrades(type === 'course' ? (item.grades || []) : null);
+    const imported = item?.kind === 'imported_class' || item?.section === 'imported_schedule';
+    document.querySelectorAll('#inspector-quick-actions [data-action]').forEach(action => { action.hidden = imported ? !['editSchedule', 'copyDetails'].includes(action.dataset.action) : action.dataset.action === 'editSchedule' || type === 'course' && ['markSeen', 'addToCalendar'].includes(action.dataset.action); });
+    document.getElementById('inspector-footer').hidden = imported || type === 'course';
     const open = document.getElementById('inspector-open-label'); if (open) open.textContent = type === 'course' ? 'Open course in LMS' : 'Open item in LMS';
     const alreadyActive = !inspector.classList.contains('hidden') || inspector.dataset.opening === 'true';
     if (alreadyActive) {
@@ -202,7 +225,7 @@
     const values = {
       'activity-course': courseNameFor(item) || 'Course unavailable',
       'activity-instructor': window.pipoMenuHelpers?.instructorFor(item) || 'Instructor unavailable',
-      'activity-kind': valueFor(item, 'kind') || 'Activity',
+      'activity-kind': item?.kind === 'imported_class' ? 'Imported class' : valueFor(item, 'kind') || 'Activity',
       'activity-due': dateText(item) || 'Date unavailable'
     };
     Object.entries(values).forEach(([id, value]) => { const node = document.getElementById(id); if (node) node.textContent = value; });
@@ -288,48 +311,51 @@
       const main = document.getElementById('main-panel');
       main?.removeAttribute('inert'); main?.removeAttribute('aria-hidden');
       inspectorTrigger?.focus?.({ preventScroll: true }); inspectorTrigger = null;
+      inspectorStack.length = 0;
       if (notifyNative) request('setInspectorVisible', { visible: false });
     };
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) finishClose();
     else {
       inspector.addEventListener('animationend', onInspectorExitEnd);
-      inspectorCloseTimer = window.setTimeout(finishClose, 240);
+      inspectorCloseTimer = window.setTimeout(finishClose, 300);
     }
     return true;
   }
   function syncInspectorModality() { const inspector = document.getElementById('inspector-panel'); const main = document.getElementById('main-panel'); const compactOpen = window.matchMedia('(max-width: 735px)').matches && inspector && !inspector.classList.contains('hidden'); if (compactOpen) { main?.setAttribute('inert', ''); main?.setAttribute('aria-hidden', 'true'); } else { main?.removeAttribute('inert'); main?.removeAttribute('aria-hidden'); } }
+  function goBackInspector() { const parent = inspectorStack.pop(); if (parent) { openItemInspector(parent.type, parent.item, true, null); return true; } return closeInspectorSafe(); }
   function itemCard(item, type) {
-    const card = el('article', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 cursor-pointer'); card.tabIndex = 0; card.setAttribute('role', 'button'); card.setAttribute('aria-label', `${itemTitle(item)}. ${cardSecondary(item, type)}`); card.dataset.itemId = item?.id || ''; card.dataset.entityKey = item?.entityKey || item?.id || '';
-    card.dataset.course = String(courseIDFor(item) || courseNameFor(item) || item?.id || '').toLowerCase(); card.dataset.category = type;
+    const card = el('article', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 cursor-pointer'); card.tabIndex = 0; card.setAttribute('role', 'button'); card.setAttribute('aria-label', `${itemTitle(item)}. ${searchText(item) || cardSecondary(item, type)}`); card.dataset.itemId = item?.id || ''; card.dataset.entityKey = item?.entityKey || item?.id || '';
+    card.dataset.course = String(courseIDFor(item) || courseNameFor(item) || item?.id || '').toLowerCase(); card.dataset.category = categoryFor(item, type);
     const secondary = cardSecondary(item, type);
     card.append(el('div', 'item-title font-medium text-neutral-200 leading-snug', itemTitle(item)));
     if (secondary) card.append(el('div', 'item-secondary text-[10px] text-neutral-400 mt-0.5 leading-snug', secondary));
     card.addEventListener('click', () => openItemInspector(type, item, false, card));
-    card.addEventListener('contextmenu', event => { event.preventDefault(); selectedItem = item; selectedType = type; showContextMenu(event.clientX, event.clientY); });
-    card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openItemInspector(type, item, false, card); } }); return card;
+    card.addEventListener('contextmenu', event => { event.preventDefault(); selectedItem = item; selectedType = type; contextTrigger = card; showContextMenu(event.clientX, event.clientY); });
+    card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openItemInspector(type, item, false, card); } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) { event.preventDefault(); selectedItem = item; selectedType = type; contextTrigger = card; const rect = card.getBoundingClientRect(); showContextMenu(rect.left + 12, rect.bottom - 4); } }); return card;
   }
   function showContextMenu(x, y) {
     const menu = document.getElementById('item-context-menu'); if (!menu) return;
     const buttons = [...menu.querySelectorAll('button')];
     const courseID = String(selectedItem?.id || selectedItem?.courseID || '');
-    if (selectedType === 'course') {
-      const pinned = currentState?.localState?.pinnedCourseIDs?.includes(courseID);
-      const labels = ['Open LMS', 'Copy details', pinned ? 'Unpin course' : 'Pin course', 'Hide course'];
-      buttons.forEach((button, index) => { button.hidden = index >= labels.length; if (labels[index]) button.querySelector('span').textContent = labels[index]; });
-    } else {
-      const labels = ['Open LMS', 'Copy details', 'Mark as seen', 'Snooze reminder', 'Add to Calendar'];
-      buttons.forEach((button, index) => { button.hidden = false; button.querySelector('span').textContent = labels[index]; });
-    }
-    buttons.forEach(button => { const label = button.textContent.trim().toLowerCase(); button.dataset.action = label.includes('unpin') ? 'unpinCourse' : label.includes('pin') ? 'pinCourse' : label.includes('hide') ? 'hideCourse' : label.includes('copy') ? 'copyDetails' : label.includes('seen') ? 'markSeen' : label.includes('snooze') ? 'snooze' : label.includes('calendar') ? 'addToCalendar' : 'openDestination'; });
-    menu.style.left = `${Math.min(x, window.innerWidth - 200)}px`; menu.style.top = `${Math.min(y, window.innerHeight - 190)}px`; menu.classList.remove('hidden');
+    const pinned = currentState?.localState?.pinnedCourseIDs?.includes(courseID);
+    const actions = window.pipoMenuHelpers.contextActions(selectedItem, selectedType, pinned);
+    buttons.forEach((button, index) => {
+      const descriptor = actions[index];
+      button.hidden = !descriptor;
+      button.setAttribute('role', 'menuitem');
+      if (!descriptor) { delete button.dataset.action; return; }
+      button.querySelector('span').textContent = descriptor.label;
+      button.dataset.action = descriptor.action;
+    });
+    menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - 200))}px`; menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - 190))}px`; menu.classList.remove('hidden'); buttons.find(button => !button.hidden)?.focus({ preventScroll: true });
   }
-  function section(title, key, items, type, status = 'ready', collapsed = false) {
+  function section(title, key, items, type, status = 'ready', collapsed = false, previous = null) {
     const wrap = el('section', 'space-y-1.5'); const heading = el('button', 'w-full flex items-center justify-between py-0.5 text-rose-400 font-semibold text-xs'); heading.type = 'button'; heading.setAttribute('aria-expanded', 'true');
     wrap.dataset.sectionKey = key;
     const headingLabel = el('span', 'flex items-center gap-2', title); const headingIcon = el('i', 'fa-solid fa-chevron-up text-[10px] text-neutral-500 group-hover:text-neutral-300 transition-transform'); heading.append(headingLabel, headingIcon);
     const content = el('div', 'space-y-1.5'); content.dataset.sectionContent = key;
     const presentation = window.pipoMenuHelpers?.sectionPresentation(status, title, items?.length || 0) || { kind: items?.length ? 'content' : 'empty', text: `No ${title.toLowerCase()}`, retry: false };
-    if (items?.length) items.forEach(item => content.append(itemCard(item, type)));
+    if (items?.length) { items.forEach(item => { const key = String(item?.entityKey || item?.id || ''); const old = previous?.querySelector(`[data-entity-key="${CSS.escape(key)}"]`); const signature = JSON.stringify(item); const card = old?.dataset.signature === signature ? old : itemCard(item, type); card.dataset.signature = signature; content.append(card); }); const degraded = ['failed', 'error', 'partial', 'stale', 'truncated', 'partialfailure', 'partial_failure'].includes(String(status).toLowerCase()); if (degraded) { const retained = el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-400', 'Some items may be out of date.'); const retry = el('button', 'mt-2 block text-rose-400 font-semibold', 'Retry'); retry.type = 'button'; retry.dataset.action = 'refreshSection'; retry.dataset.section = key; retained.append(retry); content.append(retained); } }
     else {
       const stateCard = el('div', `mac-card rounded-xl p-2.5 text-xs ${presentation.kind === 'error' ? 'text-rose-300' : 'text-neutral-400'}${presentation.kind === 'loading' ? ' animate-pulse' : ''}`, presentation.text);
       if (presentation.retry) { const retry = el('button', 'mt-2 block text-rose-400 font-semibold', 'Retry'); retry.type = 'button'; retry.dataset.action = 'refreshSection'; retry.dataset.section = key; stateCard.append(retry); }
@@ -342,6 +368,13 @@
     const seen = new Set();
     return safeArray(items).filter(item => { const id = String(item?.entityKey || item?.id || `${itemTitle(item)}:${dateText(item) || ''}`); if (seen.has(id)) return false; seen.add(id); return true; });
   }
+  function renderScheduleSearchItems(state) {
+    const today = document.getElementById('view-today'); if (!today) return;
+    let container = document.getElementById('schedule-search-items');
+    if (!container) { container = el('section', 'space-y-1.5'); container.id = 'schedule-search-items'; today.append(container); }
+    const query = String(tabState.today.query || '').trim(); container.hidden = !query || !state.scheduleImportAvailability;
+    if (!container.hidden) container.replaceChildren(...safeArray(state.scheduleSearchItems).map(item => itemCard(item, 'activity')));
+  }
   function reconcileCards(container, items, type, status = 'ready') {
     const focusedKey = document.activeElement?.dataset?.entityKey;
     const existing = new Map([...container.querySelectorAll('[data-entity-key]')].map(node => [node.dataset.entityKey, node]));
@@ -353,18 +386,22 @@
   function renderState(state) {
     const today = document.getElementById('view-today'); const courses = document.getElementById('view-courses');
     if (today && !todayShellReady) { const greeting = el('h2', 'text-sm font-bold text-white tracking-tight'); greeting.id = 'today-greeting'; const notices = el('div', 'space-y-2'); notices.id = 'today-notices'; const sections = el('div', 'space-y-3'); sections.id = 'today-sections'; today.replaceChildren(greeting, notices, sections); todayShellReady = true; }
+    renderScheduleSearchItems(state);
     const greeting = document.getElementById('today-greeting'); if (greeting) greeting.textContent = `${documentGreeting}${state.studentName ? `, ${state.studentName}` : ''}`;
-    const notices = document.getElementById('today-notices'); if (notices) { const nodes = []; if (state.phase === 'failed') { const card = el('div', 'mac-card rounded-xl p-2.5 text-xs text-rose-400', meaningful(state.errorMessage) ? state.errorMessage : 'Pipo could not load your LMS.'); const retry = el('button', 'mt-2 block font-semibold', 'Retry'); retry.type = 'button'; retry.dataset.action = 'refresh'; card.append(retry); nodes.push(card); } else if (state.phase === 'offline') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Showing saved LMS data. Some private details require a live connection.')); else if (state.phase === 'loading' || state.phase === 'authenticating') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 animate-pulse', 'Connecting to your LMS…')); if (state.failures?.length) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections could not refresh.')); if (Object.values(state.sectionStatuses || {}).some(section => section?.truncated)) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections are limited this refresh. More items remain available in the LMS.')); notices.replaceChildren(...nodes); }
+    const notices = document.getElementById('today-notices'); if (notices) { const nodes = []; if (state.persistenceAvailable === false) { const warning = el('div', 'mac-card rounded-xl p-2.5 text-xs text-rose-300', 'Changes cannot be saved.'); const retry = el('button', 'mt-2 block font-semibold', 'Retry secure storage'); retry.type = 'button'; retry.dataset.action = 'retrySecureStorage'; warning.append(retry); nodes.push(warning); } if (state.phase === 'failed') { const card = el('div', 'mac-card rounded-xl p-2.5 text-xs text-rose-400', meaningful(state.errorMessage) ? state.errorMessage : 'Pipo could not load your LMS.'); const retry = el('button', 'mt-2 block font-semibold', 'Retry'); retry.type = 'button'; retry.dataset.action = 'refresh'; card.append(retry); nodes.push(card); } else if (state.phase === 'offline') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Showing saved LMS data. Some private details require a live connection.')); else if (state.phase === 'loading' || state.phase === 'authenticating') nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300 animate-pulse', 'Connecting to your LMS…')); if (state.failures?.length) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections could not refresh.')); if (Object.values(state.sectionStatuses || {}).some(section => section?.truncated)) nodes.push(el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Some LMS sections are limited this refresh. More items remain available in the LMS.')); notices.replaceChildren(...nodes); }
+    if (state.scheduleImportAvailability && !state.scheduleAvailability) { const scheduleNotice = el('div', 'mac-card rounded-xl p-2.5 text-xs text-neutral-300', 'Add your class schedule to see imported classes here.'); const openSchedule = el('button', 'mt-2 block text-rose-400 font-semibold', 'Schedule…'); openSchedule.type = 'button'; openSchedule.dataset.action = 'editSchedule'; scheduleNotice.append(openSchedule); notices?.append(scheduleNotice); }
     const consumed = new Set(); const consume = items => uniqueItems(items).filter(item => { const key = String(item?.entityKey || item?.id || ''); if (key && consumed.has(key)) return false; if (key) consumed.add(key); return true; });
     const definitions = [
       ['Up next', 'nextUp', consume(safeArray(state.nextUp)), 'activity'], ['Due soon', 'dueSoon', consume(safeArray(state.dueSoon)), 'assignment'],
       ['Schedule', 'schedule', consume(safeArray(state.schedule)), 'activity'], ['New assignments', 'newAssignments', consume(safeArray(state.newAssignments)), 'assignment'],
       ['Notifications', 'notifications', consume(safeArray(state.notifications)), 'notification'],
       ['Messages', 'messages', consume(safeArray(state.messages)), 'message'], ['Grade feedback', 'gradeFeedback', consume(safeArray(state.gradeFeedback)), 'grade'],
-      ['Announcements', 'announcements', consume(safeArray(state.announcements)), 'announcement'], ['Resources', 'resources', consume(safeArray(state.resources)), 'resource']
+      ['Announcements', 'announcements', consume(safeArray(state.announcements)), 'announcement'], ['Resources', 'resources', consume(safeArray(state.resources)), 'resource'], ['Imported classes', 'importedSchedule', consume(safeArray(state.importedSchedule)), 'activity']
     ];
     const sectionsRoot = document.getElementById('today-sections');
-    definitions.forEach(([title, key, items, type]) => { const status = state.sectionStatuses?.[key]?.status || 'ready'; const existing = sectionsRoot?.querySelector(`[data-section-key="${key}"]`); const original = safeArray(state[key]); if (status === 'unsupported' || (original.length > 0 && items.length === 0)) { existing?.remove(); sectionSignatures.delete(key); return; } const signature = JSON.stringify([items, status]); if (sectionSignatures.get(key) === signature && existing) return; const collapsed = existing?.querySelector('button')?.getAttribute('aria-expanded') === 'false'; const replacement = section(title, key, items, type, status, collapsed); if (collapsed) { const content = replacement.querySelector('[data-section-content]'); const button = replacement.querySelector('button'); const icon = button?.querySelector('.fa-chevron-up'); if (content) content.hidden = true; button?.setAttribute('aria-expanded', 'false'); icon?.classList.remove('fa-chevron-up'); icon?.classList.add('fa-chevron-down'); } existing ? existing.replaceWith(replacement) : sectionsRoot?.append(replacement); sectionSignatures.set(key, signature); });
+    if (!state.scheduleAvailability) sectionsRoot?.querySelector('[data-section-key="importedSchedule"]')?.remove();
+    if (!state.scheduleAvailability) state = { ...state, sectionStatuses: { ...state.sectionStatuses, importedSchedule: { status: 'unsupported' } } };
+    definitions.forEach(([title, key, items, type]) => { const status = state.sectionStatuses?.[key]?.status || 'ready'; const existing = sectionsRoot?.querySelector(`[data-section-key="${key}"]`); const original = safeArray(state[key]); if (status === 'unsupported' || (original.length > 0 && items.length === 0)) { existing?.remove(); sectionSignatures.delete(key); return; } const signature = JSON.stringify([items, status]); if (sectionSignatures.get(key) === signature && existing) return; const collapsed = existing?.querySelector('button')?.getAttribute('aria-expanded') === 'false'; const replacement = section(title, key, items, type, status, collapsed, existing); if (collapsed) { const content = replacement.querySelector('[data-section-content]'); const button = replacement.querySelector('button'); const icon = button?.querySelector('.fa-chevron-up'); if (content) content.hidden = true; button?.setAttribute('aria-expanded', 'false'); icon?.classList.remove('fa-chevron-up'); icon?.classList.add('fa-chevron-down'); } existing ? existing.replaceWith(replacement) : sectionsRoot?.append(replacement); sectionSignatures.set(key, signature); });
     if (courses) reconcileCards(courses, safeArray(state.courses), 'course', state.sectionStatuses?.courses?.status || 'ready');
     const phase = state.phase || 'ready';
     document.documentElement.dataset.phase = phase;
@@ -374,7 +411,7 @@
     const sync = document.getElementById('sync-status'); if (sync) sync.textContent = statusText;
     const syncDot = document.getElementById('sync-dot'); if (syncDot) syncDot.dataset.phase = phase === 'ready' && state.failures?.length ? 'offline' : phase;
     const syncButton = document.getElementById('sync-button'); if (syncButton) { syncButton.setAttribute('aria-label', `${statusText}. Refresh Pipo`); syncButton.setAttribute('aria-busy', String(phase === 'loading' || phase === 'authenticating')); }
-    renderUpdatePresentation(state); syncSettings(state); syncCourseFilters(state); syncLocalCourses(state); applyFilters();
+    renderUpdatePresentation(state); syncSettings(state); syncCourseFilters(state); syncLocalCourses(state); const version = document.getElementById('settings-version'); if (version && meaningful(state.appVersion)) version.textContent = state.appVersion; const calendar = document.getElementById('calendar-authorization'); if (calendar && meaningful(state.calendarAuthorization)) calendar.textContent = state.calendarAuthorization; const syncDate = document.getElementById('last-sync-date'); if (syncDate && meaningful(state.refreshDate)) syncDate.textContent = state.refreshDate; applyFilters();
   }
   function renderUpdatePresentation(state) {
     const notice = state.updateNotice;
@@ -438,7 +475,7 @@
     if (state.settings && 'refreshMinutes' in state.settings) syncRefreshControl(state.settings.refreshMinutes);
     const channel = document.querySelector('#view-settings select'); if (channel && state.updateChannel) channel.value = state.updateChannel;
   }
-  function applyState(state) { if (!state || typeof state !== 'object' || (Number.isFinite(state.revision) && state.revision <= revision)) return; currentState = state; revision = Number.isFinite(state.revision) ? state.revision : revision + 1; renderState(state); switchTab(state.selectedTab || 'today', false); document.body.dataset.pipoStateReady = 'true'; document.getElementById('initial-menu-skeleton')?.remove(); window.dispatchEvent(new CustomEvent('pipo:stateApplied', { detail: state })); }
+  function applyState(state) { if (!state || typeof state !== 'object' || (Number.isFinite(state.revision) && state.revision <= revision)) return; const scroll = [...document.querySelectorAll('.view-panel')].map(node => [node.id, node.scrollTop]); const filterOpen = !document.getElementById('filter-popover')?.classList.contains('hidden'); const focusedKey = document.activeElement?.dataset?.entityKey; const contextOpen = !document.getElementById('item-context-menu')?.classList.contains('hidden'); const contextKey = contextTrigger?.dataset?.entityKey; currentState = state; revision = Number.isFinite(state.revision) ? state.revision : revision + 1; renderState(state); switchTab(state.selectedTab || activeTab || 'today', false); scroll.forEach(([id, top]) => { const node = document.getElementById(id); if (node) node.scrollTop = top; }); if (filterOpen) { document.getElementById('filter-popover')?.classList.remove('hidden'); document.getElementById('filter-toggle')?.setAttribute('aria-expanded', 'true'); } if (focusedKey) document.querySelector(`[data-entity-key="${CSS.escape(focusedKey)}"]`)?.focus({ preventScroll: true }); if (contextOpen && contextKey) { const card = document.querySelector(`[data-entity-key="${CSS.escape(contextKey)}"]`); if (card) { contextTrigger = card; selectedItem = currentState?.[card.closest('[data-section-key]')?.dataset.sectionKey]?.find?.(item => String(item?.entityKey || item?.id || '') === contextKey) || selectedItem; const rect = card.getBoundingClientRect(); showContextMenu(rect.left + 12, rect.bottom - 4); } } document.body.dataset.pipoStateReady = 'true'; document.getElementById('initial-menu-skeleton')?.remove(); window.dispatchEvent(new CustomEvent('pipo:stateApplied', { detail: state })); }
   async function loadDemoFixture() { try { const response = await fetch('./demo-fixture.json', { cache: 'no-store' }); if (!response.ok) throw new Error(`fixture ${response.status}`); applyState(await response.json()); } catch (error) { showToast('Demo data unavailable'); window.dispatchEvent(new CustomEvent('pipo:error', { detail: error })); } }
   function applyFilters() { const state = tabState[activeTab]; const query = String(state.query || '').trim().toLowerCase(); document.querySelectorAll('#view-today [data-item-id], #view-courses [data-item-id]').forEach(card => { const belongsToActivePanel = Boolean(card.closest(`#view-${activeTab}`)); if (!belongsToActivePanel) return; const searchMatch = !query || card.textContent.toLowerCase().includes(query); const courseMatch = state.courseFilter === 'all' || card.dataset.course === state.courseFilter; const categoryMatch = activeTab !== 'today' || state.categoryFilter === 'all' || card.dataset.category === state.categoryFilter; card.hidden = !(searchMatch && courseMatch && categoryMatch); }); }
   function filterCards(query) { const value = String(query || ''); tabState[activeTab].query = value; const input = document.getElementById('search-input'); if (input && input.value !== value) input.value = value; applyFilters(); }
@@ -461,25 +498,21 @@
     if (focusTab) document.getElementById(`tab-${valid}`)?.focus();
     if (notify) request('selectTab', { tab: valid });
   }
-  function dismissMenu() { const menu = document.getElementById('item-context-menu'); if (!menu || menu.classList.contains('hidden')) return false; menu.classList.add('hidden'); return true; }
+  function dismissMenu() { const menu = document.getElementById('item-context-menu'); if (!menu || menu.classList.contains('hidden')) return false; menu.classList.add('hidden'); contextTrigger?.focus?.({ preventScroll: true }); contextTrigger = null; return true; }
   function dismissFilter() { const popover = document.getElementById('filter-popover'); if (!popover || popover.classList.contains('hidden')) return false; popover.classList.add('hidden'); document.getElementById('filter-toggle')?.setAttribute('aria-expanded', 'false'); return true; }
   function bindActions() {
     initializeClickAudio();
+    document.getElementById('search-input')?.addEventListener('input', () => { if (currentState) renderScheduleSearchItems(currentState); });
     const tabNames = ['today', 'courses', 'settings'];
     tabNames.forEach((tab, index) => { const node = document.getElementById(`tab-${tab}`); if (!node) return; node.addEventListener('click', () => switchTab(tab)); node.addEventListener('keydown', event => { let next = null; if (event.key === 'ArrowRight') next = (index + 1) % tabNames.length; if (event.key === 'ArrowLeft') next = (index - 1 + tabNames.length) % tabNames.length; if (event.key === 'Home') next = 0; if (event.key === 'End') next = tabNames.length - 1; if (next == null) return; event.preventDefault(); switchTab(tabNames[next], true, true); }); });
-    document.querySelectorAll('button').forEach(node => {
-      const label = node.textContent.trim().toLowerCase(); let action = null;
-      if (label === 'sign out') action = 'signOut'; else if (label.includes('allow calendar')) action = 'requestCalendarAccess'; else if (label.includes('refresh')) action = 'refresh'; else if (label.includes('calendar')) action = 'addToCalendar'; else if (label.includes('copy')) action = 'copyDetails'; else if (label.includes('seen')) action = 'markSeen'; else if (label.includes('snooze')) action = 'snooze'; else if (label.includes('open')) action = 'openDestination'; else if (label.includes('clear')) action = 'clearCache'; else if (label.includes('update')) action = 'checkForUpdates'; else if (label.includes('diagnostic')) action = 'exportDiagnostics';
-      if (label.includes('open lms in browser')) node.dataset.lmsRoot = 'true';
-      if (action && !node.dataset.action) node.dataset.action = action;
-    });
+    document.querySelectorAll('button[data-action], button[data-menu-action]').forEach(node => { if (node.dataset.menuAction && !node.dataset.action) node.dataset.action = node.dataset.menuAction; });
     document.querySelectorAll('[id^="section-"] > button, [data-collapse-target]').forEach(heading => {
       const content = heading.nextElementSibling; if (!content) return; const icon = heading.querySelector('.fa-chevron-up, .fa-chevron-down'); if (content.id) heading.setAttribute('aria-controls', content.id); heading.setAttribute('aria-expanded', 'true'); heading.addEventListener('click', () => { const collapsed = content.hidden = !content.hidden; heading.setAttribute('aria-expanded', String(!collapsed)); icon?.classList.toggle('fa-chevron-up', !collapsed); icon?.classList.toggle('fa-chevron-down', collapsed); });
     });
     document.getElementById('search-input')?.addEventListener('input', event => { tabState[activeTab].query = event.target.value; applyFilters(); document.getElementById('clear-search')?.classList.toggle('hidden', !event.target.value); });
     document.getElementById('clear-search')?.addEventListener('click', () => filterCards(''));
     document.getElementById('filter-toggle')?.addEventListener('click', event => { const popover = document.getElementById('filter-popover'); const hidden = popover?.classList.toggle('hidden'); event.currentTarget.setAttribute('aria-expanded', String(!hidden)); });
-    document.querySelectorAll('.cat-filter-btn').forEach(button => button.addEventListener('click', () => { const label = button.textContent.trim().toLowerCase(); tabState[activeTab].categoryFilter = label.startsWith('all') ? 'all' : label.replace(/s$/, ''); applyFilters(); dismissFilter(); }));
+    document.querySelectorAll('.cat-filter-btn').forEach(button => button.addEventListener('click', () => { tabState[activeTab].categoryFilter = button.dataset.category || 'all'; applyFilters(); dismissFilter(); }));
     const settingNames = ['notificationsEnabled', 'reminderDayBefore', 'reminderHourBefore', 'assignmentNotifications', 'announcementNotifications', 'messageNotifications', 'gradeNotifications'];
     document.querySelectorAll('input.apple-switch').forEach((input, index) => { input.dataset.setting = input.dataset.setting || settingNames[index] || 'notificationsEnabled'; input.addEventListener('change', () => request('updateSettings', { [input.dataset.setting]: input.checked }, 'main', input)); });
     const refresh = document.getElementById('refresh-slider');
@@ -487,7 +520,7 @@
     refresh?.addEventListener('change', event => request('updateSettings', { refreshMinutes: Number(event.target.value) }, 'main', event.target));
     syncRefreshControl(refresh?.value);
     document.querySelectorAll('select').forEach(select => select.addEventListener('change', () => request('updateChannel', { channel: select.value }, 'main', select)));
-    document.getElementById('inspector-back')?.addEventListener('click', closeInspectorSafe); document.getElementById('inspector-close')?.addEventListener('click', closeInspectorSafe);
+    document.getElementById('inspector-back')?.addEventListener('click', goBackInspector); document.getElementById('inspector-close')?.addEventListener('click', closeInspectorSafe);
     document.getElementById('inspector-panel')?.addEventListener('animationend', event => {
       if (event.target !== event.currentTarget || event.animationName !== 'inspector-panel-in' || event.currentTarget.dataset.closing === 'true') return;
       event.currentTarget.classList.remove('inspector-enter');
@@ -495,10 +528,12 @@
     });
     document.addEventListener('pointerdown', event => playClickFor(event.target), true);
     document.addEventListener('keydown', event => { if ((event.key === 'Enter' || event.key === ' ') && !event.repeat) playClickFor(event.target); }, true);
-    document.addEventListener('click', event => { const menu = document.getElementById('item-context-menu'); if (!event.target.closest('#item-context-menu')) dismissMenu(); if (!event.target.closest('#filter-popover') && !event.target.closest('#filter-toggle')) dismissFilter(); const actionButton = event.target.closest('[data-action]'); if (!actionButton) return; const rawAction = actionButton.dataset.action; if (rawAction.startsWith('selectTab:')) return; if (rawAction === 'closeInspector') return closeInspectorSafe(); if (rawAction === 'clearCache' && !window.confirm('Clear the saved dashboard? Pipo will fetch it again on refresh.')) return; const itemID = selectedType === 'course' ? null : selectedItem?.id; const courseID = actionButton.dataset.courseId || (selectedType === 'course' ? (selectedItem?.id || selectedItem?.courseID) : null); const payload = actionButton.dataset.lmsRoot === 'true' ? { lmsRoot: true } : rawAction === 'refreshSection' ? { section: actionButton.dataset.section } : rawAction === 'loadCourse' ? { courseID, openToken: inspectorOpenToken } : courseID ? { courseID } : itemID ? { itemID } : {}; const source = actionButton.closest('#inspector-panel') ? 'inspector' : 'main'; request(rawAction, payload, source, actionButton); dismissMenu(); event.preventDefault(); event.stopImmediatePropagation(); }, true);
+    document.addEventListener('click', event => { const menu = document.getElementById('item-context-menu'); if (!event.target.closest('#item-context-menu')) dismissMenu(); if (!event.target.closest('#filter-popover') && !event.target.closest('#filter-toggle')) dismissFilter(); const actionButton = event.target.closest('[data-action]'); if (!actionButton) return; const rawAction = actionButton.dataset.action; if (rawAction.startsWith('selectTab:')) return; if (rawAction === 'closeInspector') return closeInspectorSafe(); if (rawAction === 'clearCache' && !window.confirm('Clear the saved dashboard? Pipo will fetch it again on refresh.')) return; const itemID = selectedType === 'course' ? null : selectedItem?.id; const courseID = actionButton.dataset.courseId || (selectedType === 'course' ? (selectedItem?.id || selectedItem?.courseID) : null); const payload = actionButton.dataset.lmsRoot === 'true' ? { lmsRoot: true } : rawAction === 'refreshSection' ? { sections: retryTargets[actionButton.dataset.section] || [actionButton.dataset.section] } : rawAction === 'loadCourse' ? { courseID, openToken: inspectorOpenToken } : courseID ? { courseID } : itemID ? { itemID } : {}; const source = actionButton.closest('#inspector-panel') ? 'inspector' : 'main'; request(rawAction, payload, source, actionButton); dismissMenu(); event.preventDefault(); event.stopImmediatePropagation(); }, true);
     document.addEventListener('keydown', event => {
       const whatsNew = document.getElementById('whats-new-backdrop');
       if (event.key === 'Tab' && whatsNew && !whatsNew.classList.contains('hidden')) { event.preventDefault(); document.getElementById('dismiss-whats-new')?.focus(); return; }
+      const menu = document.getElementById('item-context-menu');
+      if (menu && !menu.classList.contains('hidden') && ['ArrowDown', 'ArrowUp'].includes(event.key)) { const buttons = [...menu.querySelectorAll('button:not([hidden]):not([disabled])')]; const index = buttons.indexOf(document.activeElement); if (buttons.length) { event.preventDefault(); buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus(); } return; }
       if (event.key === 'Escape') { event.preventDefault(); if (dismissMenu()) return; if (dismissFilter()) { document.getElementById('filter-toggle')?.focus(); return; } if (closeInspectorSafe()) return; request('dismissMenu'); return; }
       const inspector = document.getElementById('inspector-panel');
       if (event.key !== 'Tab' || !window.matchMedia('(max-width: 735px)').matches || !inspector || inspector.classList.contains('hidden')) return;
@@ -507,6 +542,18 @@
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     });
     window.addEventListener('resize', syncInspectorModality);
+    let clockTimer;
+    const refreshLocalClock = () => {
+      if (!currentState) return;
+      sectionSignatures.delete('importedSchedule');
+      document.querySelectorAll('[data-section-key="importedSchedule"] [data-entity-key]').forEach(card => { delete card.dataset.signature; });
+      const focused = document.activeElement?.dataset?.entityKey;
+      renderState(currentState);
+      if (focused) document.querySelector(`[data-entity-key="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+    };
+    const wakeClock = () => { window.clearTimeout(clockTimer); const delay = 60000 - (Date.now() % 60000) + 20; clockTimer = window.setTimeout(() => { refreshLocalClock(); wakeClock(); }, delay); };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { refreshLocalClock(); wakeClock(); } });
+    wakeClock();
     window.addEventListener('unhandledrejection', event => { event.preventDefault(); showToast('Pipo could not complete that action.'); window.dispatchEvent(new CustomEvent('pipo:error', { detail: event.reason })); });
     window.addEventListener('pipo-reset-session', () => {
       requests.forEach(pending => { window.clearTimeout(pending.timeoutID); setActionPending(pending.trigger, false); }); requests.clear();

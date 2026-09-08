@@ -303,7 +303,8 @@ public protocol AccountScopedDashboardCache: DashboardCache {
     func delete(accountID: String) async throws
 }
 
-public actor EncryptedDashboardCache: AccountScopedDashboardCache, AccountScopedLocalStateStore {
+/// GRDB serializes database access; the encryption key is immutable.
+public final class EncryptedDashboardCache: AccountScopedDashboardCache, AccountScopedLocalStateStore, @unchecked Sendable {
     private let database: DatabaseQueue
     private let key: SymmetricKey
 
@@ -419,6 +420,21 @@ public actor EncryptedDashboardCache: AccountScopedDashboardCache, AccountScoped
         try database.write { db in
             try db.execute(sql: "DELETE FROM pipo_local_state_accounts")
             try db.execute(sql: "DELETE FROM pipo_local_state")
+        }
+    }
+
+    /// Called only after the vault has established ownership of the legacy
+    /// account. Move ciphertext transactionally; retain an existing new scope.
+    public func migrateAccount(from legacy: String, to scoped: String) throws {
+        guard legacy != scoped else { return }
+        try database.write { db in
+            for table in ["pipo_cache_accounts", "pipo_local_state_accounts"] {
+                try db.execute(
+                    sql: "INSERT OR IGNORE INTO \(table) (account_id, payload) SELECT ?, payload FROM \(table) WHERE account_id = ?",
+                    arguments: [scoped, legacy]
+                )
+                try db.execute(sql: "DELETE FROM \(table) WHERE account_id = ?", arguments: [legacy])
+            }
         }
     }
 }

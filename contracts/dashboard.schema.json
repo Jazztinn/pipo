@@ -5,10 +5,11 @@
   "type": "object",
   "required": ["version", "id", "method"],
   "properties": {
-    "version": { "const": 1 },
+    "version": { "const": 4 },
     "id": { "type": "string", "minLength": 1 },
     "method": {
       "enum": [
+        "hello",
         "authenticate_with_password",
         "authenticate_with_token",
         "discover_capabilities",
@@ -21,4 +22,3 @@
   },
   "additionalProperties": false
 }
-

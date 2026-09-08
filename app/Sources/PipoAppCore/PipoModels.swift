@@ -91,7 +91,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     }
 
     public func privacyProjected() -> DashboardSnapshot {
-        DashboardSnapshot(version: version, generatedAt: generatedAt, siteName: siteName, studentName: studentName, sections: sections.privacyProjected(), supported: supported, assignmentIDs: assignmentIDs, courses: courses, failures: failures, nextUp: nextUp, schedule: schedule, announcements: announcements, resources: resources, sectionTimestamps: sectionTimestamps, sectionResults: sectionResults, syncDiagnostics: syncDiagnostics)
+        DashboardSnapshot(version: version, generatedAt: generatedAt, siteName: siteName, studentName: studentName, sections: sections.privacyProjected(), supported: supported, assignmentIDs: assignmentIDs, courses: courses.map { Course(id: $0.id, name: $0.name, shortName: $0.shortName, instructor: $0.instructor, upcomingCount: $0.upcomingCount) }, failures: failures, nextUp: [], schedule: schedule, announcements: announcements, resources: resources, sectionTimestamps: sectionTimestamps, sectionResults: sectionResults, syncDiagnostics: syncDiagnostics)
     }
 
     public func upgradedToVersionThree() -> DashboardSnapshot {
@@ -364,7 +364,11 @@ public struct DashboardSections: Codable, Equatable, Sendable {
     }
 
     public func suppressingDueSoonDuplicates() -> DashboardSections {
-        let due = DashboardItem.deduplicated(dueSoon)
+        let assignmentByKey = Dictionary(newAssignments.map { ($0.stableKey, $0) }, uniquingKeysWith: { first, _ in first })
+        let due = DashboardItem.deduplicated(dueSoon).map { item in
+            guard let assignment = assignmentByKey[item.stableKey], item.submissionStatus == nil else { return item }
+            return DashboardItem(id: item.id, entityKey: item.entityKey, kind: item.kind, title: item.title, courseID: item.courseID, courseName: item.courseName, instructor: item.instructor, timestamp: item.timestamp, isUnread: item.isUnread, destination: item.destination, detail: item.detail ?? assignment.detail, excerpt: item.excerpt ?? assignment.excerpt, submissionStatus: assignment.submissionStatus, resourceKind: item.resourceKind, section: item.section)
+        }
         let dueIdentifiers = Set(due.map(\.stableKey))
         return DashboardSections(
             dueSoon: due,
@@ -715,13 +719,13 @@ private extension String {
 
 public enum PipoSecrets {
     public static func redact(_ value: String) -> String {
-        var result = value
-        for key in ["token", "wstoken", "password"] {
-            guard let range = result.range(of: key, options: .caseInsensitive) else { continue }
-            let suffix = result[range.upperBound...]
-            let end = suffix.firstIndex(where: { $0 == "&" || $0 == " " || $0 == "\n" || $0 == "\"" }) ?? result.endIndex
-            result.replaceSubrange(range.lowerBound..<end, with: "[REDACTED]")
+        let patterns = [
+            #"(?i)\b(?:wstoken|access_token|refresh_token|token|password)\b[\"']?\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s&;,}]+)"#,
+            #"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"#
+        ]
+        return patterns.reduce(value) { text, pattern in
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+            return regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "[REDACTED]")
         }
-        return result
     }
 }

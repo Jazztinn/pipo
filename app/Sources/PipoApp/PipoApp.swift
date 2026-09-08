@@ -53,7 +53,10 @@ final class PipoUpdater: NSObject, SPUUpdaterDelegate {
     private nonisolated(unsafe) var channelObserver: NSObjectProtocol?
     private var probeTask: Task<Void, Never>?
     private let defaults: UserDefaults
-    private static let lastProbeKey = "pipo.updates.last-information-probe"
+    private static let lastAttemptKey = "pipo.updates.last-information-attempt"
+    private static let lastSuccessKey = "pipo.updates.last-information-success"
+    private static let retryAfterKey = "pipo.updates.information-retry-after"
+    private static let retryDelay: TimeInterval = 60 * 60
 
     init(
         bundle: Bundle = .main,
@@ -73,7 +76,9 @@ final class PipoUpdater: NSObject, SPUUpdaterDelegate {
             Task { @MainActor in
                 guard let self else { return }
                 self.presentation.resetForChannelChange()
-                self.defaults.removeObject(forKey: Self.lastProbeKey)
+                self.defaults.removeObject(forKey: Self.lastAttemptKey)
+                self.defaults.removeObject(forKey: Self.lastSuccessKey)
+                self.defaults.removeObject(forKey: Self.retryAfterKey)
                 self.controller.updater.resetUpdateCycleAfterShortDelay()
             }
         }
@@ -110,15 +115,17 @@ final class PipoUpdater: NSObject, SPUUpdaterDelegate {
 
     private func probeIfDue(now: Date = .now) {
         guard controller.updater.canCheckForUpdates else { return }
+        if let retryAfter = defaults.object(forKey: Self.retryAfterKey) as? Date, retryAfter > now { return }
         guard PipoUpdateProbePolicy.isDue(
-            lastProbe: defaults.object(forKey: Self.lastProbeKey) as? Date,
+            lastProbe: defaults.object(forKey: Self.lastSuccessKey) as? Date,
             now: now
         ) else { return }
-        defaults.set(now, forKey: Self.lastProbeKey)
+        defaults.set(now, forKey: Self.lastAttemptKey)
         controller.updater.checkForUpdateInformation()
     }
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        recordSuccessfulProbe()
         presentation.presentUpdate(
             version: item.displayVersionString,
             build: item.versionString,
@@ -127,11 +134,21 @@ final class PipoUpdater: NSObject, SPUUpdaterDelegate {
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        recordSuccessfulProbe()
         presentation.clearUpdateNotice()
     }
 
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        defaults.set(Date.now.addingTimeInterval(Self.retryDelay), forKey: Self.retryAfterKey)
+    }
+
+    private func recordSuccessfulProbe() {
+        defaults.set(Date.now, forKey: Self.lastSuccessKey)
+        defaults.removeObject(forKey: Self.retryAfterKey)
+    }
+
     func feedURLString(for updater: SPUUpdater) -> String? {
-        switch UserDefaults.standard.string(forKey: "pipo.updates.channel") {
+        switch defaults.string(forKey: "pipo.updates.channel") {
         case "beta": "https://raw.githubusercontent.com/Jazztinn/pipo/main/appcast-beta.xml"
         default: "https://raw.githubusercontent.com/Jazztinn/pipo/main/appcast.xml"
         }
@@ -143,12 +160,15 @@ extension Notification.Name {
 }
 
 @MainActor
-final class PipoAppDelegate: NSObject, NSApplicationDelegate {
+final class PipoAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let model = PipoModel.live()
     let updater = PipoUpdater()
+    private let usageTracker = PipoUsageTracker()
     private var menuBarController: PipoMenuBarController?
     private var didStartModel = false
     private var isStopping = false
+    private var scheduleWindow: NSWindow?
+    private var scheduleObserver: NSObjectProtocol?
 
     var installUpdate: (@MainActor () -> Void)? {
         updater.isConfigured ? updater.checkForUpdates : nil
@@ -158,15 +178,49 @@ final class PipoAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        usageTracker.start()
         menuBarController = PipoMenuBarController(
             model: model,
             installUpdate: installUpdate,
             updatePresentation: updatePresentation
         )
         updater.start()
+        scheduleObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("com.jazztinn.pipo.open-schedule"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.showSchedule() }
+        }
         guard !didStartModel else { return }
         didStartModel = true
         Task { await model.start() }
+    }
+
+    private func showSchedule() {
+        guard model.scheduleEnabled || model.scheduleImportEnabled,
+              model.sessionContext.accountID != "anonymous" else { return }
+        if scheduleWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 1040, height: 720),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Pipo Schedule"
+            window.delegate = self
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: PipoScheduleCenterView(controller: model.scheduleController))
+            window.center()
+            scheduleWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        scheduleWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === scheduleWindow else { return }
+        model.scheduleController.cancelReview()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -183,6 +237,7 @@ final class PipoAppDelegate: NSObject, NSApplicationDelegate {
         guard !isStopping else { return .terminateLater }
         isStopping = true
         updater.stop()
+        usageTracker.stop()
         Task {
             await model.stop()
             sender.reply(toApplicationShouldTerminate: true)

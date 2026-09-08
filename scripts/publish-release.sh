@@ -34,6 +34,8 @@ trap cleanup EXIT
 
 test -f "$ARCHIVE"
 test -x "$SPARKLE_BIN/generate_appcast"
+test "$(git -C "$ROOT" status --porcelain -- "$APPCAST")" = ""
+test "$(git -C "$ROOT" tag -l "$TAG")" = ""
 
 mkdir "$EXTRACTED" "$UPDATES"
 ditto -x -k "$ARCHIVE" "$EXTRACTED"
@@ -54,11 +56,4 @@ fi
   -o "$APPCAST" \
   "$UPDATES"
 
-gh release create "$TAG" \
-  "$UPDATES/Pipo-$VERSION-universal.dmg" \
-  "$ARCHIVE#Pipo $VERSION portable ZIP" \
-  --repo Jazztinn/pipo \
-  --title "Pipo $VERSION" \
-  --generate-notes
-
-echo "Published $TAG. Commit and push $(basename "$APPCAST") to activate the update."
+echo "Generated $(basename "$APPCAST"). Release publication is CI-only: dispatch .github/workflows/release.yml from an exact green main commit."

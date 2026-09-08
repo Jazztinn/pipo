@@ -1,0 +1,5 @@
+# Verified from vendor GitHub releases on 2026-09-08.
+# Sparkle release 2.9.2 is published by Sparkle-Bot from commit 6276ba2b404829d139c45ff98427cf90e2efc59b.
+1cb340cbbef04c6c0d162078610c25e2221031d794a3449d89f2f56f4df77c95  Sparkle-2.9.2.tar.xz
+# From gitleaks_8.28.0_checksums.txt released by gitleaks v8.28.0.
+a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb  gitleaks_8.28.0_linux_x64.tar.gz

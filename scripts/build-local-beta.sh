@@ -4,6 +4,12 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 DIST="$ROOT/dist"
 APP="$DIST/Pipo.app"
+BUILD_SHA=${PIPO_BUILD_SHA:-$(git -C "$ROOT" rev-parse HEAD)}
+
+if ! printf '%s' "$BUILD_SHA" | grep -Eq '^[0-9a-fA-F]{40}$'; then
+  echo "PIPO_BUILD_SHA must be a Git commit SHA" >&2
+  exit 64
+fi
 
 if ! xcodebuild -version >/dev/null 2>&1; then
   echo "Full Xcode is required. Install Xcode, then select it with xcode-select."
@@ -32,6 +38,9 @@ lipo -create \
   "$ROOT/rust/target/x86_64-apple-darwin/release/pipo-core" \
   -output "$APP/Contents/MacOS/pipo-core"
 cp "$ROOT/app/Resources/Info.plist" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :PipoBuildCommit string $BUILD_SHA" "$APP/Contents/Info.plist"
+test "$(/usr/libexec/PlistBuddy -c 'Print :PipoBuildCommit' "$APP/Contents/Info.plist")" = "$BUILD_SHA"
+cp "$ROOT/app/Resources/PipoIcon.icns" "$APP/Contents/Resources/PipoIcon.icns"
 cp "$ROOT/app/Resources/PipoIcon.png" "$APP/Contents/Resources/PipoIcon.png"
 cp "$ROOT/LICENSE" "$APP/Contents/Resources/Legal/LICENSE.txt"
 cp "$ROOT/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/Legal/THIRD_PARTY_NOTICES.md"

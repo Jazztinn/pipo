@@ -82,6 +82,7 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
     private var stdoutBuffer = Data()
     private var stderrDrain: Task<Void, Never>?
     private var pending: [String: PendingResponse] = [:]
+    private var processGeneration: UInt64 = 0
     private var didHandshake = false
     private var startupTask: Task<Void, Error>?
     private var requestInProgress = false
@@ -100,7 +101,9 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
         guard request.version == 4 else { throw PipoCoreError.invalidResponse }
         try await acquireRequestSlot(id: request.id)
         defer { releaseRequestSlot() }
+        try Task.checkCancellation()
         try await startIfNeeded()
+        try Task.checkCancellation()
         let timeout: TimeInterval = request.method == "refresh_dashboard" ? 50 : request.method == "load_course" ? 35 : 25
         let response = try await sendWrittenRequest(request, timeout: timeout)
         if let failure = response.error { throw failure.classifiedError }
@@ -172,11 +175,12 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
         process.standardError = errors
         try process.run()
         self.process = process
+        let generation = processGeneration
         stdin = input.fileHandleForWriting
         stdout = output.fileHandleForReading
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            Task { await self?.consume(data) }
+            Task { await self?.consume(data, generation: generation) }
         }
         let errorHandle = errors.fileHandleForReading
         stderrDrain = Task.detached(priority: .utility) {
@@ -202,7 +206,9 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
 
     private func sendWrittenRequest(_ request: SidecarRequest, timeout: TimeInterval) async throws -> SidecarResponse {
         guard let stdin, process?.isRunning == true else { throw PipoCoreError.sidecarUnavailable }
+        try Task.checkCancellation()
         let payload = try JSONEncoder().encode(request) + Data([0x0A])
+        guard payload.count <= 2 * 1024 * 1024 else { throw PipoCoreError.invalidResponse }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let timeoutTask = Task { [weak self] in
@@ -224,13 +230,14 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
         }
     }
 
-    private func consume(_ data: Data) {
+    private func consume(_ data: Data, generation: UInt64) {
+        guard generation == processGeneration else { return }
         guard !data.isEmpty else {
             stopSession(error: PipoCoreError.sidecarUnavailable)
             return
         }
         stdoutBuffer.append(data)
-        guard stdoutBuffer.count <= 8 * 1024 * 1024 else {
+        guard stdoutBuffer.count <= 2 * 1024 * 1024 else {
             stopSession(error: PipoCoreError.invalidResponse)
             return
         }
@@ -260,9 +267,13 @@ public actor PipoCoreProcessTransport: PipoSidecarTransport {
         guard let pendingResponse = pending.removeValue(forKey: requestID) else { return }
         pendingResponse.timeout.cancel()
         pendingResponse.continuation.resume(throwing: CancellationError())
+        // Rust cannot cancel a written request. End this process before another
+        // request can acquire the slot and observe its late reply.
+        stopSession(error: CancellationError())
     }
 
     private func stopSession(error: Error = PipoCoreError.sidecarUnavailable) {
+        processGeneration &+= 1
         stdout?.readabilityHandler = nil
         try? stdin?.close()
         try? stdout?.close()

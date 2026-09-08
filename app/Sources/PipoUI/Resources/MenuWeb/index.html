@@ -90,7 +90,7 @@
     }
 
     .mac-segmented-btn.active {
-      background: #ff5277; /* Crimson / Light Red accent */
+      background: #a61e46; /* Accessible crimson accent */
       color: #ffffff;
       font-weight: 600;
       box-shadow: 0 2px 10px rgba(255, 82, 119, 0.35);
@@ -225,8 +225,10 @@
     }
     #dismiss-whats-new:hover { background: rgb(251,113,133); }
     @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.001ms !important; }
       #update-notice *, #whats-new-backdrop, #whats-new-dialog { animation: none !important; transition: none !important; }
     }
+    :is(button, input, select, [role="button"], [tabindex="0"]):focus-visible { outline: 2px solid #fda4af; outline-offset: 2px; }
     /* Shared header geometry. Keep title and status in separate, fixed lanes. */
     #pipo-header {
       position: relative;
@@ -368,15 +370,121 @@
     html.embedded body > .relative > .mac-window.w-\[380px\] { width: 380px; height: 580px; max-width: 380px; flex: 0 0 380px; }
     html.embedded body > .relative > #inspector-viewport { width: 340px; height: 580px; max-width: 340px; max-height: 580px; flex: 0 0 340px; }
 
+    /* Canonical feature previews expose live MenuWeb components without
+       changing normal showcase or native-host geometry. */
+    html[data-component-preview],
+    html[data-component-preview] body {
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+    html[data-component-preview] body { visibility: hidden; }
+    html[data-component-preview][data-component-preview-ready="true"] body { visibility: visible; }
+    html[data-component-preview] body > #pipo-shell {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      padding: 10px;
+      display: block;
+      box-sizing: border-box;
+      overflow: hidden;
+      transform: none;
+    }
+    html[data-component-preview] #main-panel {
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      border-radius: 14px;
+    }
+    html[data-component-preview]:not([data-component-preview="quickActions"]) #inspector-viewport,
+    html[data-component-preview="quickActions"] #main-panel,
+    html[data-component-preview] #item-context-menu { display: none !important; }
+    html[data-component-preview]:not([data-component-preview="quickActions"]) #main-panel > :not(#view-today):not(#toast) { display: none !important; }
+    html[data-component-preview]:not([data-component-preview="quickActions"]) #view-today {
+      width: 100%;
+      height: 100% !important;
+      padding: 12px;
+      display: block !important;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+    html[data-component-preview]:not([data-component-preview="quickActions"]) #view-today > :not(#today-sections) { display: none !important; }
+    html[data-component-preview]:not([data-component-preview="quickActions"]) #today-sections > [data-section-key] { display: none; }
+    html[data-component-preview="nextUp"] #today-sections > [data-section-key="nextUp"],
+    html[data-component-preview="resources"] #today-sections > [data-section-key="resources"],
+    html[data-component-preview="today"] #today-sections > [data-section-key="schedule"],
+    html[data-component-preview="today"] #today-sections > [data-section-key="messages"] { display: block !important; }
+    html[data-component-preview="nextUp"] [data-section-key="nextUp"] [data-item-id]:not(:first-child),
+    html[data-component-preview="today"] [data-section-key] [data-item-id]:not(:first-child),
+    html[data-component-preview="resources"] [data-section-key="resources"] [data-item-id]:nth-child(n + 3) { display: none; }
+    html[data-component-preview="today"] #today-sections {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 12px;
+    }
+    html[data-component-preview="nextUp"] #today-sections,
+    html[data-component-preview="resources"] #today-sections {
+      height: 100%;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+    }
+    html[data-component-preview="quickActions"] #inspector-viewport {
+      position: static;
+      inset: auto;
+      width: 100% !important;
+      height: 100%;
+      max-width: none !important;
+      max-height: none;
+      flex: 0 0 auto;
+      display: block;
+      pointer-events: auto;
+      overflow: hidden;
+    }
+    html[data-component-preview="quickActions"] #inspector-panel {
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      max-height: none;
+      padding: 14px;
+      display: flex !important;
+      border-radius: 14px;
+      box-sizing: border-box;
+    }
+    html[data-component-preview="quickActions"] :is(#inspector-nav, #inspector-footer) { display: none; }
+    html[data-component-preview="quickActions"] #inspector-scroll {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    html[data-component-preview="quickActions"] #inspector-scroll > .space-y-4 > :not(#inspector-quick-actions) { display: none; }
+    html[data-component-preview="quickActions"] #inspector-quick-actions {
+      height: 100%;
+      padding-top: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
     .inspector-enter {
       animation: inspector-panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-      will-change: transform;
+      will-change: transform, opacity;
+      backface-visibility: hidden;
     }
 
     .inspector-exit {
       animation: inspector-panel-out 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
       pointer-events: none;
-      will-change: transform;
+      will-change: transform, opacity;
+      backface-visibility: hidden;
     }
 
     /* Keep inspector context visible while its detail content scrolls. */
@@ -409,13 +517,13 @@
     .item-secondary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     @keyframes inspector-panel-in {
-      from { transform: translateX(var(--inspector-enter-offset, 24px)); }
-      to { transform: translateX(0); }
+      from { opacity: 0; transform: translateX(var(--inspector-enter-offset, 24px)); }
+      to { opacity: 1; transform: translateX(0); }
     }
 
     @keyframes inspector-panel-out {
-      from { transform: translateX(0); }
-      to { transform: translateX(var(--inspector-enter-offset, 24px)); }
+      from { opacity: 1; transform: translateX(0); }
+      to { opacity: 0; transform: translateX(var(--inspector-enter-offset, 24px)); }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -468,7 +576,7 @@
             <h3 id="inspector-title" class="font-bold text-sm text-white leading-snug">Details</h3>
             <p id="inspector-subtitle" class="text-[11px] text-neutral-400 mt-1">No item selected</p>
           </div>
-          <button class="mac-card rounded-lg px-3 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+              <button type="button" data-action="openDestination" data-lms-root="true" class="mac-card rounded-lg px-3 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
             <i class="fa-solid fa-arrow-up-right-from-square text-rose-400 text-[10px]"></i> <span id="inspector-open-label">Open course in LMS</span>
           </button>
         </div>
@@ -543,20 +651,23 @@
         </div>
 
         <!-- Quick Actions Grid -->
-        <div class="space-y-1.5 pt-2">
+        <div id="inspector-quick-actions" class="space-y-1.5 pt-2">
           <div class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Quick Actions</div>
           <div class="grid grid-cols-2 gap-2">
-            <button class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
+            <button type="button" data-action="openDestination" class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
               <i class="fa-solid fa-arrow-up-right-from-square text-rose-400"></i> Open LMS
             </button>
-            <button class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
+            <button type="button" data-action="copyDetails" class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
               <i class="fa-regular fa-copy text-rose-400"></i> Copy Details
             </button>
-            <button class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
+            <button type="button" data-action="markSeen" class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
               <i class="fa-regular fa-eye text-emerald-400"></i> Mark Seen
             </button>
-            <button class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
+            <button type="button" data-action="addToCalendar" class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
               <i class="fa-regular fa-calendar-plus text-sky-400"></i> Add Calendar
+            </button>
+            <button type="button" data-action="editSchedule" class="mac-card rounded-lg p-2 text-left hover:bg-white/10 transition flex items-center gap-2 text-neutral-200">
+              <i class="fa-regular fa-pen-to-square text-rose-400"></i> Edit Schedule
             </button>
           </div>
         </div>
@@ -565,7 +676,7 @@
 
       <div id="inspector-footer" class="pt-4 border-t border-white/10 text-[10px] text-neutral-500 flex items-center justify-between">
         <span>Session-only controls</span>
-        <button class="text-rose-400 hover:underline font-medium">Snooze reminder</button>
+        <button type="button" data-action="snooze" class="text-rose-400 hover:underline font-medium">Snooze reminder</button>
       </div>
     </div>
     </div>
@@ -642,11 +753,11 @@
             </div>
 
             <div id="category-filters" class="pt-2 space-y-0.5">
-              <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-200 text-xs">All Activity Types</button>
-              <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Assignments</button>
-              <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Announcements</button>
-              <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Resources</button>
-              <button class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Messages</button>
+              <button type="button" data-category="all" class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-200 text-xs">All Activity Types</button>
+              <button type="button" data-category="assignment" class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Assignments</button>
+              <button type="button" data-category="announcement" class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Announcements</button>
+              <button type="button" data-category="resource" class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Resources</button>
+              <button type="button" data-category="message" class="cat-filter-btn w-full text-left px-2 py-1 rounded-md hover:bg-white/10 text-neutral-400 text-xs">Messages</button>
             </div>
           </div>
         </div>
@@ -775,7 +886,7 @@
             </div>
             <div class="flex items-center justify-between border-t border-white/5 pt-2 text-xs">
               <span class="text-neutral-300 font-medium">Last successful sync</span>
-              <span class="text-neutral-400 font-mono text-[11px]">Not connected</span>
+              <span id="last-sync-date" class="text-neutral-400 font-mono text-[11px]">Not connected</span>
             </div>
           </div>
         </div>
@@ -786,7 +897,7 @@
           <div class="mac-card rounded-xl p-3 space-y-3">
             <div class="flex items-center justify-between">
               <span class="text-xs text-neutral-200 font-medium">Notifications</span>
-              <input type="checkbox" checked class="apple-switch">
+              <input type="checkbox" checked class="apple-switch" data-setting="notificationsEnabled" aria-label="Notifications">
             </div>
             <div class="space-y-1.5 border-t border-white/5 pt-2.5">
               <div class="flex items-center justify-between text-xs">
@@ -796,7 +907,7 @@
               <input id="refresh-slider" type="range" min="5" max="60" step="5" value="15" aria-labelledby="refresh-label" aria-describedby="refresh-value" class="w-full accent-rose-500 bg-white/10 h-1 rounded-lg appearance-none cursor-pointer">
             </div>
             <div class="pt-1">
-              <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+              <button type="button" data-action="refresh" class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
                 <i class="fa-solid fa-rotate-right text-rose-400 text-xs"></i> Refresh now
               </button>
             </div>
@@ -809,11 +920,11 @@
           <div class="mac-card rounded-xl p-3 space-y-3 text-xs">
             <div class="flex items-center justify-between">
               <span class="text-neutral-200 font-medium">24 hours before deadline</span>
-              <input type="checkbox" checked class="apple-switch">
+              <input type="checkbox" checked class="apple-switch" data-setting="reminderDayBefore" aria-label="24 hours before deadline">
             </div>
             <div class="flex items-center justify-between border-t border-white/5 pt-2.5">
               <span class="text-neutral-200 font-medium">1 hour before deadline</span>
-              <input type="checkbox" checked class="apple-switch">
+              <input type="checkbox" checked class="apple-switch" data-setting="reminderHourBefore" aria-label="1 hour before deadline">
             </div>
           </div>
         </div>
@@ -824,19 +935,19 @@
           <div class="mac-card rounded-xl p-3 space-y-3 text-xs">
             <div class="flex items-center justify-between">
               <span class="text-neutral-200 font-medium">Assignments</span>
-              <input type="checkbox" checked class="apple-switch">
+              <input type="checkbox" checked class="apple-switch" data-setting="assignmentNotifications" aria-label="Assignment notifications">
             </div>
             <div class="flex items-center justify-between border-t border-white/5 pt-2.5">
               <span class="text-neutral-200 font-medium">Announcements</span>
-              <input type="checkbox" checked class="apple-switch">
+              <input type="checkbox" checked class="apple-switch" data-setting="announcementNotifications" aria-label="Announcement notifications">
             </div>
             <div class="flex items-center justify-between border-t border-white/5 pt-2.5">
               <span class="text-neutral-200 font-medium">Messages</span>
-              <input type="checkbox" checked class="apple-switch">
+              <input type="checkbox" checked class="apple-switch" data-setting="messageNotifications" aria-label="Message notifications">
             </div>
             <div class="flex items-center justify-between border-t border-white/5 pt-2.5">
               <span class="text-neutral-200 font-medium">Grade feedback</span>
-              <input type="checkbox" checked class="apple-switch">
+              <input type="checkbox" checked class="apple-switch" data-setting="gradeNotifications" aria-label="Grade notifications">
             </div>
           </div>
         </div>
@@ -855,10 +966,10 @@
           <div class="mac-card rounded-xl p-3 space-y-2.5 text-xs">
             <div class="flex items-center justify-between">
               <span class="text-neutral-300 font-medium">Authorization</span>
-              <span class="text-neutral-400 font-medium">Not connected</span>
+              <span id="calendar-authorization" class="text-neutral-400 font-medium">Not connected</span>
             </div>
             <div>
-              <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+              <button type="button" data-action="requestCalendarAccess" class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
                 <i class="fa-regular fa-calendar-plus text-rose-400 text-xs"></i> Allow Calendar access
               </button>
             </div>
@@ -869,7 +980,7 @@
         <div class="space-y-1.5">
           <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Storage</div>
           <div class="mac-card rounded-xl p-3 text-xs">
-            <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+            <button type="button" data-action="clearCache" class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
               <i class="fa-regular fa-trash-can text-rose-400 text-xs"></i> Clear saved dashboard
             </button>
           </div>
@@ -887,13 +998,13 @@
               </select>
             </div>
             <div>
-              <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+              <button type="button" data-action="checkForUpdates" class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
                 <i class="fa-solid fa-arrow-down-to-line text-rose-400 text-xs"></i> Check for updates
               </button>
             </div>
             <div class="flex items-center justify-between border-t border-white/5 pt-2">
               <span class="text-neutral-400">Version</span>
-              <span class="text-neutral-300 font-mono text-[11px]">0.4.10</span>
+              <span id="settings-version" class="text-neutral-300 font-mono text-[11px]">0.4.10</span>
             </div>
           </div>
         </div>
@@ -902,7 +1013,7 @@
         <div class="space-y-1.5">
           <div class="text-[11px] font-semibold text-neutral-400 px-0.5">Diagnostics</div>
           <div class="mac-card rounded-xl p-3 space-y-2 text-xs">
-            <button class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
+            <button type="button" data-action="exportDiagnostics" class="mac-card rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 hover:text-white flex items-center gap-2 transition">
               <i class="fa-solid fa-file-export text-rose-400 text-xs"></i> Export redacted diagnostics
             </button>
             <p class="text-[10px] text-neutral-500 leading-relaxed pt-1">
@@ -914,7 +1025,7 @@
         <!-- Sign Out Section -->
         <div class="space-y-1.5">
           <div class="pt-1">
-            <button class="mac-card w-full rounded-xl p-2.5 text-center text-xs font-medium text-rose-400 hover:bg-rose-500/10 transition">
+            <button type="button" data-action="signOut" class="mac-card w-full rounded-xl p-2.5 text-center text-xs font-medium text-rose-400 hover:bg-rose-500/10 transition">
               Sign out
             </button>
           </div>
@@ -969,24 +1080,24 @@
 
     <!-- ITEM CONTEXT ACTION POPOVER -->
     <div id="item-context-menu" role="menu" aria-label="Item actions" class="hidden absolute mac-popover rounded-xl w-48 p-1.5 z-50 text-xs space-y-0.5 shadow-2xl">
-      <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
+      <button type="button" data-menu-action="openDestination" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
         <span>Open LMS</span>
         <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-neutral-400"></i>
       </button>
-      <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
+      <button type="button" data-menu-action="copyDetails" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
         <span>Copy details</span>
         <i class="fa-regular fa-copy text-[10px] text-neutral-400"></i>
       </button>
-      <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
+      <button type="button" data-menu-action="markSeen" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
         <span>Mark as seen</span>
         <i class="fa-regular fa-check-circle text-[10px] text-neutral-400"></i>
       </button>
-      <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
+      <button type="button" data-menu-action="snooze" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-neutral-200 flex items-center justify-between">
         <span>Snooze reminder</span>
         <i class="fa-regular fa-bell-slash text-[10px] text-neutral-400"></i>
       </button>
       <div class="border-t border-white/10 my-1"></div>
-      <button class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-rose-400 flex items-center justify-between">
+      <button type="button" data-menu-action="addToCalendar" class="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-rose-400 flex items-center justify-between">
         <span>Add to Calendar</span>
         <i class="fa-regular fa-calendar-plus text-[10px]"></i>
       </button>
