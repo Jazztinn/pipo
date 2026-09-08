@@ -234,14 +234,14 @@ import Testing
 
 @Test func quietHourRemindersMoveToQuietEnd() {
     var components = DateComponents()
-    components.calendar = Calendar(identifier: .gregorian)
+    components.calendar = PipoSchoolClock.calendar
     components.year = 2026
     components.month = 8
     components.day = 21
     components.hour = 23
     let source = components.date!
     let shifted = PipoReminderPlanner.shiftOutOfQuietHours(source, settings: PipoSettings())
-    #expect(Calendar.current.component(.hour, from: shifted) == 7)
+    #expect(PipoSchoolClock.calendar.component(.hour, from: shifted) == 7)
 }
 
 @Test func diagnosticsExcludeStudentAndPrivatePayloads() throws {
